@@ -1,0 +1,49 @@
+{
+  "name": "obsidian-yggdrasil",
+  "version": "0.1.0",
+  "description": "RAG-powered AI assistance for dungeon masters and world-builders in Obsidian",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc -noEmit -skipLibCheck false && node esbuild.config.mjs production",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix",
+    "typecheck": "tsc -noEmit"
+  },
+  "keywords": [
+    "obsidian",
+    "obsidian-plugin",
+    "obsidian-yggdrasil",
+    "rag",
+    "ai",
+    "dnd",
+    "world-building"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@lancedb/lancedb": "^0.30.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "26.0.1",
+    "@typescript-eslint/eslint-plugin": "8.62.0",
+    "@typescript-eslint/parser": "8.62.0",
+    "builtin-modules": "5.2.0",
+    "esbuild": "0.28.1",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-no-only-tests": "^3.4.0",
+    "eslint-plugin-simple-import-sort": "^13.0.0",
+    "globals": "^17.6.0",
+    "jsdom": "^29.1.1",
+    "obsidian": "^1.7.0",
+    "tslib": "^2.8.0",
+    "typescript": "6.0.3",
+    "typescript-eslint": "^8.61.0",
+    "vitest": "4.1.9"
+  },
+  "module": "ESNext",
+  "type": "module"
+}

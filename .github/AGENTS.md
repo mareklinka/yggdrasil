@@ -18,6 +18,8 @@ All AI agents MUST follow the structured SDLC defined in [docs/sdlc.md](./sdlc.m
 
 **Phase transitions are HARD.** Never skip, merge, or bypass stages. The agent MUST enforce this workflow even without explicit user prompting.
 
+**Linting:** Run `npm run lint` after every code change. Fix all lint errors before proceeding. Use `npm run lint:fix` for auto-fixable issues, then manually review remaining warnings. Code MUST pass linting before any commit or PR.
+
 ---
 
 ### Architecture Essentials
