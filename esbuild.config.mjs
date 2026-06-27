@@ -34,8 +34,13 @@ const plugins = [
 
 const commonOptions = {
   bundle: true,
-  external: ['obsidian', ...builtinModules.filter((m) => !m.startsWith('node:'))],
-  platform: 'browser',
+  external: [
+    'obsidian',
+    '@lancedb/lancedb',
+    '@lancedb/lancedb-linux-x64-gnu',
+    ...builtinModules.filter((m) => !m.startsWith('node:')),
+  ],
+  platform: 'node',
   sourcemap: isProd ? false : 'inline',
   minify: isProd,
   treeShaking: true,
