@@ -2,10 +2,10 @@
   "name": "obsidian-yggdrasil",
   "version": "0.1.0",
   "description": "RAG-powered AI assistance for dungeon masters and world-builders in Obsidian",
-  "main": "main.js",
+  "main": "dist/main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",
-    "build": "tsc -noEmit -skipLibCheck false && node esbuild.config.mjs production",
+    "build": "tsc -noEmit && node esbuild.config.mjs production",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint src/",
