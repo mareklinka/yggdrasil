@@ -5,7 +5,7 @@ import * as path from 'path';
 
 const isProd = process.argv.includes('production');
 
-const VAULT_PLUGIN_DIR = path.resolve('test-vault/.obsidian/plugins/obsidian-yggdrasil');
+const VAULT_PLUGIN_DIR = path.resolve('test-vault/.obsidian/plugins/yggdrasil');
 
 const plugins = [
   {
@@ -36,8 +36,6 @@ const commonOptions = {
   bundle: true,
   external: [
     'obsidian',
-    '@lancedb/lancedb',
-    '@lancedb/lancedb-linux-x64-gnu',
     ...builtinModules.filter((m) => !m.startsWith('node:')),
   ],
   platform: 'node',

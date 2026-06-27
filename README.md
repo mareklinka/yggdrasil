@@ -7,24 +7,13 @@ RAG-powered AI assistance for dungeon masters and world-builders in Obsidian.
 ```
 src/
 ├── main.ts              # Plugin entry point
-├── settings.ts          # PluginSettings interface + SettingTab
-├── index/
-│   ├── manager.ts       # IndexManager: full/incremental indexing
-│   ├── chunker.ts       # Heading-aware markdown chunker
-│   └── schema.ts        # TypeScript types for indexed documents
 ├── rag/
-│   ├── embedder.ts      # Embedding client
-│   ├── retriever.ts     # Hybrid search
-│   ├── prompt.ts        # Prompt assembly
-│   └── llm.ts           # LLM response generation
-├── store/
-│   └── vector-store.ts  # LanceDB integration
-├── ui/
-│   ├── sidebar.ts       # Chat sidebar view
-│   ├── chat-panel.ts    # Chat UI component
-│   └── components/      # Reusable UI components
-└── utils/               # Helper functions
+│   ├── chunker.ts       # Token-aware markdown chunking
+│   ├── embedder.ts      # Embedding client (LiteLLM proxy)
+│   ├── indexer.ts       # Indexing orchestrator
+│   └── vector-store.ts  # Orama vector store
 tests/                   # Vitest unit tests
+test-vault/              # Test Obsidian vault
 ```
 
 ## Getting Started

@@ -100,6 +100,12 @@ export class Embedder {
 		if (response.data.length === 0) {
 			throw new Error('Empty embedding response');
 		}
+		const actualDim = response.data[0].embedding.length;
+		if (actualDim !== this.#config.dimensions) {
+			throw new Error(
+				`Dimension mismatch: expected ${this.#config.dimensions}, got ${actualDim}`
+			);
+		}
 		return response.data[0].embedding;
 	}
 
@@ -170,7 +176,6 @@ export class Embedder {
 		const requestBody: EmbeddingRequest = {
 			model: this.#config.model,
 			input: texts,
-			dimensions: this.#config.dimensions,
 			encoding_type: 'float',
 		};
 
@@ -186,6 +191,7 @@ export class Embedder {
 			if (response.status >= 400) {
 				const errorBody = response.json as EmbeddingErrorResponse;
 				const errorMessage = errorBody.error?.message ?? `HTTP ${response.status}`;
+				console.error(`Embedding API error: ${errorMessage}`, response);
 				throw new Error(`Embedding API error (${response.status}): ${errorMessage}`);
 			}
 
@@ -193,6 +199,7 @@ export class Embedder {
 			return parsedResponse;
 		} catch (error) {
 			if (error instanceof Error) {
+				console.error('Embedding request failed:', error);
 				throw new Error(`Embedding request failed: ${error.message}`, {
 					cause: error,
 				});

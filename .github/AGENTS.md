@@ -30,46 +30,37 @@ All AI agents MUST follow the structured SDLC defined in [docs/sdlc.md](./sdlc.m
 flowchart TD
     subgraph Obsidian["Obsidian Desktop App (Electron)"]
         subgraph Plugin["Yggdrasil Plugin"]
-            UI["Chat Sidebar\n(ItemView)"]
-            Settings["Settings Tab\n(SettingTab)"]
-            Index["Index Manager\n(Vault watcher +\nfile management)"]
+            Ribbon["Ribbon Icon\n(Reindex trigger)"]
+            Modal["Reindex Confirmation\nModal"]
 
-            RAG["RAG Pipeline"]
+            Indexer["Indexer\n(Orchestrator)"]
 
-            Chunker["Chunker\n(heading-aware)"]
+            Chunker["Chunker\n(token-aware)"]
             Embedder["Embedder\n(OpenAI-compatible\nembedding API)"]
-            Retriever["Retriever\n(semantic + FTS)"]
-            Prompt["Prompt Assembler"]
-            LLM["LLM\n(OpenAI-compatible\nchat API)"]
 
-            VectorDB["LanceDB Vector Store\n(semantic similarity)"]
-            FTS["LanceDB FTS\n(full-text search)"]
+            VectorDB["Orama Vector Store\n(semantic similarity + FTS)"]
         end
 
         ObsidianAPI["Obsidian Core APIs\nVault | MetadataCache | FileManager | Workspace"]
     end
 
     %% UI layer
-    UI --> RAG
-    Settings --> RAG
-    Index --> RAG
+    Ribbon --> Modal
+    Modal --> Indexer
 
     %% RAG pipeline flow
     Chunker --> Embedder
     Embedder --> VectorDB
-    VectorDB -.-> Retriever
-    FTS -.-> Retriever
-    Retriever --> Prompt
-    Prompt --> LLM
+    Indexer --> Chunker
+    Indexer --> VectorDB
 
     %% Data sources
-    ObsidianAPI --> Index
-    ObsidianAPI --> Retriever
+    ObsidianAPI --> Indexer
 ```
 
 **Key architectural decisions:**
 - **Single plugin, all-in-process.** No separate backend service. All RAG logic runs inside the plugin's sandboxed Electron webview.
-- **LanceDB embedded.** Vector store is file-based on disk — no server process needed. Data persists in the vault's `.obsidian/plugins/yggdrasil/` directory.
+- **Orama embedded.** Pure JavaScript vector database that works in browsers, Electron, and Node.js — no native modules required. Index persists as a JSON file in the vault's `.yggdrasil/` directory.
 - **OpenAI-compatible endpoints.** Both embedding and LLM calls go to user-configurable URLs (Ollama, LM Studio, vLLM, OpenAI, etc.). No API keys stored in code — configured via plugin settings.
 - **Obsidian metadata cache as source of truth.** Headings, links, tags, and frontmatter come from `app.metadataCache`, not custom parsing. The plugin builds on top of Obsidian's existing parsing.
 - **TypeScript plugin.** Compiled with Obsidian's plugin toolchain to a single `main.js`. Uses ES modules internally during development.
@@ -86,10 +77,10 @@ flowchart TD
 
 **Plugin data (persisted):**
 - Plugin settings via `this.loadData()` / `this.saveData()` (stored in `.obsidian/plugins/yggdrasil/data.json`)
-- LanceDB index stored in `.obsidian/plugins/yggdrasil/index/` (auto-managed by LanceDB)
+- Orama index stored in `.yggdrasil/vectors.json` (JSON serialization)
 - Plugin manifest in `.obsidian/plugins/yggdrasil/manifest.json`
 
-**Index schema (LanceDB table: `notes`):**
+**Index schema (Orama document):**
 ```typescript
 interface IndexedDocument {
   id: string;           // file path + chunk offset, e.g. "campaigns/silverpeak/npcs/grommet.md:0"
@@ -110,9 +101,9 @@ interface IndexedDocument {
 ```
 
 **Indexing strategy:**
-- **Full re-index:** Triggered on first run or via command. Iterates all markdown files, chunks, embeds, and stores in LanceDB.
+- **Full re-index:** Triggered on first run or via command. Iterates all markdown files, chunks, embeds, and stores in Orama. Index is persisted as JSON.
 - **Incremental re-index:** Triggered by `Vault.on('modify')` / `Vault.on('create')` / `Vault.on('delete')` events. Only re-processes affected files.
-- **Deduplication:** Delete existing embeddings for a file path before re-indexing it. Use `source` metadata as the filter key.
+- **Deduplication:** Remove existing chunks for a file path before re-indexing it. Use `id` (format: `<source>__<chunkIndex>`) as the unique key.
 
 ---
 
@@ -122,7 +113,7 @@ interface IndexedDocument {
 |---------|---------|---------------|
 | **Embedding endpoint** | Generate vector embeddings for text chunks | User-configurable URL + optional API key in plugin settings. OpenAI-compatible API (e.g., `POST /v1/embeddings`). |
 | **LLM endpoint** | Generate responses with retrieved context | User-configurable URL + optional API key in plugin settings. OpenAI-compatible API (e.g., `POST /v1/chat/completions`). |
-| **LanceDB** | Embedded vector store for semantic search | File-based, stored in plugin data directory. No external service. |
+| **Orama** | Embedded vector store for semantic search + full-text | Pure JS, stored as JSON file in vault. No external service. |
 | **Obsidian API** | Vault access, metadata, UI components | Provided by the host Obsidian app. Import from `obsidian` package. |
 
 **Embedding API contract (OpenAI-compatible):**
@@ -244,7 +235,7 @@ src/
 3. **Index Manager** — full re-index of all vault markdown files, incremental re-index on file changes
 4. **Chunker** — heading-aware markdown chunking using Obsidian's `CachedMetadata`
 5. **Embedder** — call OpenAI-compatible embedding endpoint
-6. **Vector Store** — LanceDB integration: store, delete, query embeddings with metadata filters
+6. **Vector Store** — Orama integration: store, delete, query embeddings with full-text search
 7. **Retriever** — hybrid search: semantic similarity + full-text score merging
 8. **Prompt Assembler** — inject retrieved chunks into a system prompt template
 9. **LLM Client** — call OpenAI-compatible chat endpoint with assembled prompt
@@ -292,8 +283,8 @@ src/
 
 **Retrieval approach (hybrid):**
 ```typescript
-// 1. Run semantic search: LanceDB similarity search with embedding vector
-// 2. Run full-text search: LanceDB FTS query
+// 1. Run semantic search: Orama vector similarity search
+// 2. Run full-text search: Orama keyword search
 // 3. Merge results using reciprocal rank fusion or weighted score combination
 // 4. Return top-k combined results with source metadata
 // 5. Pass merged results to prompt assembler
@@ -317,7 +308,7 @@ User prompt: "Context:\n{chunk1}\n\n{chunk2}\n\n...\n\nQuestion: {userQuestion}"
 5. **Validate user input.** Sanitize strings before sending to LLM (no injection attacks via vault content).
 6. **Respect vault permissions.** Only read/write files within the current vault.
 7. **Test with empty vaults.** Ensure the plugin handles vaults with no markdown files gracefully.
-8. **Check for existing LanceDB index.** Don't overwrite a valid index during incremental updates.
+8. **Check for existing Orama index.** Don't overwrite a valid index during incremental updates.
 9. **Debounced file watching.** Coalesce rapid file changes into a single re-index operation.
 10. **Memory limits.** Be mindful of the Electron webview memory budget — don't load entire vaults into memory at once.
 
@@ -332,7 +323,7 @@ User prompt: "Context:\n{chunk1}\n\n{chunk2}\n\n...\n\nQuestion: {userQuestion}"
 | Obsidian API types | `npm:obsidian` (type definitions from Obsidian package) |
 | Obsidian sample plugin | `https://github.com/obsidianmd/obsidian-sample-plugin` |
 | LangChain.js docs | `https://js.langchain.com/docs` |
-| LanceDB JS docs | `https://lancedb.github.io/lancedb/` |
+| Orama docs | `https://docs.oramadb.com` |
 | Obsidian plugin manifest | `manifest.json` (plugin root) |
 | Plugin data directory | `.obsidian/plugins/yggdrasil/` |
 

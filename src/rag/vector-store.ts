@@ -1,220 +1,256 @@
 /**
- * LanceDB vector store wrapper for storing and managing text embeddings.
+ * Orama-based vector store for storing and managing text embeddings.
+ * Orama is a pure JavaScript vector database that works in browsers,
+ * Electron, and Node.js — no native modules required.
  */
 
-import * as lancedb from '@lancedb/lancedb';
-import { makeArrowTable } from '@lancedb/lancedb';
-import { Field, FixedSizeList, Float32, Int32, Schema, Utf8 } from 'apache-arrow';
+import type { RawData } from "@orama/orama";
+import {
+  type AnyOrama,
+  count,
+  create,
+  insertMultiple,
+  load,
+  remove,
+  save,
+  search,
+} from "@orama/orama";
 
 /** Represents a stored chunk with its embedding. */
 export interface StoredChunk {
-	/** Unique identifier: "<source>__<chunkIndex>". */
-	id: string;
-	/** The chunk text content. */
-	text: string;
-	/** The embedding vector. */
-	embedding: Array<number>;
-	/** The source file path (vault-relative). */
-	source: string;
-	/** The position index within the source file. */
-	chunkIndex: number;
+  /** Unique identifier: "<source>__<chunkIndex>". */
+  id: string;
+  /** The chunk text content. */
+  text: string;
+  /** The embedding vector. */
+  embedding: Array<number>;
+  /** The source file path (vault-relative). */
+  source: string;
+  /** The position index within the source file. */
+  chunkIndex: number;
+}
+
+/** Result of a vector similarity search. */
+export interface SearchMatch {
+  /** The stored chunk that matched. */
+  chunk: StoredChunk;
+  /** Cosine similarity score (higher = more similar). */
+  score: number;
+}
+
+/** Interface for file persistence (Obsidian Vault or mock). */
+export interface FilePersistence {
+  /** Write text content to a file, creating parent directories as needed. */
+  write(filePath: string, content: string): Promise<void>;
+  /** Read text content from a file. */
+  read(filePath: string): Promise<string>;
+  /** Check whether a file exists. */
+  exists(filePath: string): Promise<boolean>;
 }
 
 /** Configuration for the vector store. */
 export interface VectorStoreConfig {
-	/** The path to the LanceDB database directory. */
-	dbPath: string;
-	/** The name of the table to use. Default: 'chunks'. */
-	tableName?: string;
-	/** The embedding vector dimension. */
-	dimensions: number;
+  /** The path to the Orama index JSON file. */
+  dbPath: string;
+  /** The embedding vector dimension. */
+  dimensions: number;
 }
 
-/** Default table name. */
-const DEFAULT_TABLE_NAME = 'chunks';
+/** Default embedding dimensions. */
+const DEFAULT_DIMENSIONS = 1024;
 
 /**
- * LanceDB vector store for managing text embeddings.
+ * Orama vector store for managing text embeddings.
+ * Uses Orama's save/load for persistence to a JSON file.
  */
 export class VectorStore {
-	readonly #config: {
-		dbPath: string;
-		tableName: string;
-		dimensions: number;
-	};
-	#connection: lancedb.Connection | null = null;
-	#table: lancedb.Table | null = null;
+  readonly #config: {
+    dbPath: string;
+    dimensions: number;
+  };
+  readonly #fileSystem: FilePersistence;
+  #orama: AnyOrama | null = null;
 
-	public constructor(config: VectorStoreConfig) {
-		this.#config = {
-			dbPath: config.dbPath,
-			tableName: config.tableName ?? DEFAULT_TABLE_NAME,
-			dimensions: config.dimensions,
-		};
-	}
+  public constructor(config: VectorStoreConfig, fileSystem: FilePersistence) {
+    this.#config = {
+      dbPath: config.dbPath,
+      dimensions: config.dimensions ?? DEFAULT_DIMENSIONS,
+    };
+    this.#fileSystem = fileSystem;
+  }
 
-	/**
-	 * Initialize the connection and ensure the table exists.
-	 * Creates the table if it doesn't exist, or opens it if it does.
-	 */
-	public async initialize(): Promise<void> {
-		this.#connection = await lancedb.connect(this.#config.dbPath);
-		await this.#ensureTableExists();
-	}
+  /**
+   * Check if the database has been initialized.
+   * @returns True if the Orama instance is available.
+   */
+  public isInitialized(): boolean {
+    return this.#orama !== null;
+  }
 
-	/**
-	 * Close the connection and release resources.
-	 */
-	public async close(): Promise<void> {
-		if (this.#table !== null) {
-			this.#table.close();
-			this.#table = null;
-		}
-		if (this.#connection !== null) {
-			this.#connection.close();
-			this.#connection = null;
-		}
-	}
+  /**
+   * Create and initialize a new Orama database with the correct schema.
+   */
+  public async createNew(): Promise<void> {
+    this.#orama = await create({
+      schema: {
+        id: "string",
+        text: "string",
+        source: "string",
+        chunkIndex: "number",
+        embedding: `vector[${this.#config.dimensions}]`,
+      },
+    });
+  }
 
-	/**
-	 * Get the underlying LanceDB table.
-	 * Must call initialize() first.
-	 *
-	 * @returns The LanceDB table.
-	 */
-	public async getTable(): Promise<lancedb.Table> {
-		if (this.#table === null) {
-			throw new Error('VectorStore not initialized. Call initialize() first.');
-		}
-		return this.#table;
-	}
+  /**
+   * Initialize the vector store by attempting to load from disk.
+   * If the database file is missing (e.g., first installation), creates a new empty store.
+   * Throws only if the file exists but is corrupted or unreadable.
+   */
+  public async initialize(): Promise<void> {
+    if (this.#orama === null) {
+      await this.createNew();
+    }
 
-	/**
-	 * Clear all data from the table (keep the table structure).
-	 */
-	public async clear(): Promise<void> {
-		const table = await this.getTable();
-		await table.delete('1=1'); // Delete all rows
-	}
+    const exists = await this.#fileSystem.exists(this.#config.dbPath);
+    if (exists) {
+      await this.loadFromDisk();
+    }
+  }
 
-	/**
-	 * Drop the table entirely.
-	 */
-	public async dropTable(): Promise<void> {
-		if (this.#connection === null) {
-			throw new Error('VectorStore not initialized. Call initialize() first.');
-		}
-		await this.#connection.dropTable(this.#config.tableName);
-		this.#table = null;
-	}
+  /**
+   * Load an existing database from the persisted JSON file.
+   * Reads from `dbPath` and deserializes it into the Orama instance.
+   */
+  public async loadFromDisk(): Promise<void> {
+    if (this.#orama === null) {
+      throw new Error("VectorStore not initialized. Call createNew() first.");
+    }
 
-	/**
-	 * Insert chunks into the vector store.
-	 *
-	 * @param chunks - Array of chunks with embeddings to insert.
-	 */
-	public async addChunks(chunks: Array<StoredChunk>): Promise<void> {
-		if (chunks.length === 0) {
-			return;
-		}
+    try {
+      const rawJson = await this.#fileSystem.read(this.#config.dbPath);
+      const raw = JSON.parse(rawJson) as RawData;
+      load(this.#orama, raw);
+      console.log(`Vector store loaded from ${this.#config.dbPath}, containing ${await this.countChunks()} chunk(s).`);
+    } catch {
+      throw new Error(
+        `Failed to load vector store from ${this.#config.dbPath}. ` +
+          "The file may be missing or corrupted.",
+      );
+    }
+  }
 
-		const table = await this.getTable();
+  /**
+   * Save the current database state to the persisted JSON file.
+   * Serializes the Orama instance and writes it to `dbPath`.
+   */
+  public async saveToDisk(): Promise<void> {
+    const raw = save(this.getOrama());
+    const json = JSON.stringify(raw, null, 2);
+    await this.#fileSystem.write(this.#config.dbPath, json);
+    console.log(`Vector store persisted to ${this.#config.dbPath}, containing ${await this.countChunks()} chunk(s).`);
+  }
 
-		// Convert to Arrow table format
-		const arrowData = chunks.map((chunk) => ({
-			id: chunk.id,
-			text: chunk.text,
-			vector: chunk.embedding,
-			source: chunk.source,
-			// eslint-disable-next-line @typescript-eslint/naming-convention -- Arrow table column name
-			chunk_index: chunk.chunkIndex,
-		}));
+  /**
+   * Get the underlying Orama instance.
+   * Must  createNew() first.
+   *
+   * @returns The Orama instance.
+   */
+  public getOrama(): AnyOrama {
+    if (this.#orama === null) {
+      throw new Error("VectorStore not initialized. Call createNew() first.");
+    }
+    return this.#orama;
+  }
 
-		const arrowTable = makeArrowTable(arrowData);
-		await table.add(arrowTable, { mode: 'append' });
-	}
+  /**
+   * Insert chunks into the vector store.
+   *
+   * @param chunks - Array of chunks with embeddings to insert.
+   */
+  public async addChunks(chunks: Array<StoredChunk>): Promise<void> {
+    const orama = this.getOrama();
+    const docs = chunks.map((chunk) => ({
+      id: chunk.id,
+      text: chunk.text,
+      source: chunk.source,
+      chunkIndex: chunk.chunkIndex,
+      embedding: chunk.embedding,
+    }));
+    await insertMultiple(orama, docs);
+  }
 
-	/**
-	 * Replace all data in the table with new chunks.
-	 * This is a convenience method for full reindexing.
-	 *
-	 * @param chunks - Array of chunks with embeddings to insert.
-	 */
-	public async replaceAll(chunks: Array<StoredChunk>): Promise<void> {
-		await this.clear();
-		if (chunks.length > 0) {
-			await this.addChunks(chunks);
-		}
-	}
+  /**
+   * Remove a chunk by its ID.
+   *
+   * @param id - The chunk ID to remove.
+   */
+  public async removeChunk(id: string): Promise<void> {
+    const orama = this.getOrama();
+    await remove(orama, id);
+  }
 
-	/**
-	 * Check if the table exists in the database.
-	 *
-	 * @returns True if the table exists.
-	 */
-	public async tableExists(): Promise<boolean> {
-		if (this.#connection === null) {
-			throw new Error('VectorStore not initialized. Call initialize() first.');
-		}
-		const tables = await this.#connection.tableNames();
-		return tables.includes(this.#config.tableName);
-	}
+  /**
+   * Remove all chunks from the store.
+   */
+  public async clear(): Promise<void> {
+    const orama = this.getOrama();
+    // Get all document IDs via fulltext search and remove them
+    const allDocs = await search(orama, {
+      mode: "fulltext",
+      term: "",
+      limit: 10000,
+    });
+    for (const hit of allDocs.hits) {
+      await remove(orama, hit.id);
+    }
+  }
 
-	/**
-	 * Get the number of chunks stored.
-	 *
-	 * @returns The number of chunks.
-	 */
-	public async countChunks(): Promise<number> {
-		const table = await this.getTable();
-		return table.countRows();
-	}
+  /**
+   * Perform a vector similarity search.
+   *
+   * @param vector - The embedding vector to search with.
+   * @param limit - Maximum number of results.
+   * @param similarity - Minimum similarity threshold (0-1).
+   * @returns Array of matching chunks with similarity scores.
+   */
+  public async search(
+    vector: Array<number>,
+    limit: number = 10,
+    similarity: number = 0,
+  ): Promise<Array<SearchMatch>> {
+    const orama = this.getOrama();
+    const results = await search(orama, {
+      mode: "vector",
+      vector: {
+        value: vector,
+        property: "embedding" as const,
+      },
+      limit,
+      similarity,
+      includeVectors: false,
+    });
 
-	async #ensureTableExists(): Promise<void> {
-		if (this.#connection === null) {
-			throw new Error('VectorStore not initialized. Call initialize() first.');
-		}
+    return results.hits.map((hit) => ({
+      chunk: hit.document as unknown as StoredChunk,
+      score: hit.score,
+    }));
+  }
 
-		const tables = await this.#connection.tableNames();
+  /**
+   * Get the number of chunks stored.
+   *
+   * @returns The number of chunks.
+   */
+  public async countChunks(): Promise<number> {
+    return count(this.getOrama());
+  }
 
-		if (tables.includes(this.#config.tableName)) {
-			// Table exists, open it
-			this.#table = await this.#connection.openTable(this.#config.tableName);
-			return;
-		}
-
-		// Create the table with the correct schema
-		await this.#createTable();
-	}
-
-	async #createTable(): Promise<void> {
-		if (this.#connection === null) {
-			throw new Error('VectorStore not initialized. Call initialize() first.');
-		}
-
-		// Create an empty Arrow table with the correct schema
-		const schema = new Schema([
-			Field.new('id', new Utf8()),
-			Field.new('text', new Utf8()),
-			Field.new('vector', new FixedSizeList(this.#config.dimensions, new Field('item', new Float32()))),
-			Field.new('source', new Utf8()),
-			Field.new('chunk_index', new Int32()),
-		]);
-
-		this.#table = await this.#connection.createEmptyTable(
-			this.#config.tableName,
-			schema
-		);
-	}
-}
-
-/**
- * Create a vector store instance.
- *
- * @param dbPath - The path to the LanceDB database directory.
- * @param dimensions - The embedding vector dimension.
- * @returns A new VectorStore instance.
- */
-export function createVectorStore(dbPath: string, dimensions: number): VectorStore {
-	return new VectorStore({ dbPath, dimensions });
+  /**
+   * Close the store and release resources.
+   */
+  public async close(): Promise<void> {
+    this.#orama = null;
+  }
 }
