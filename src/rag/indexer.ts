@@ -40,10 +40,6 @@ export interface IndexerConfig {
   dbPath: string;
   /** Embedding dimensions. */
   dimensions: number;
-  /** Embedding endpoint URL (optional, uses default if not provided). */
-  embedEndpoint?: string;
-  /** Embedding model name (optional, uses default if not provided). */
-  embedModel?: string;
 }
 
 /** Result of a full reindex operation. */

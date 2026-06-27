@@ -153,13 +153,13 @@ export class VectorStore {
 
   /**
    * Get the underlying Orama instance.
-   * Must  createNew() first.
+   * Must call `initialize()` or `createNew()` first.
    *
    * @returns The Orama instance.
    */
   public getOrama(): AnyOrama {
     if (this.#orama === null) {
-      throw new Error("VectorStore not initialized. Call createNew() first.");
+      throw new Error("VectorStore not initialized. Call initialize() first.");
     }
     return this.#orama;
   }

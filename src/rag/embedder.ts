@@ -113,7 +113,6 @@ export class Embedder {
 	 * Embed multiple texts in batches using the configured endpoint.
 	 *
 	 * @param texts - The texts to embed.
-	 * @returns An array of EmbeddingResult objects.
 	 * @returns An array of EmbeddingResult objects and any errors that occurred.
 	 */
 	public async embedMany(texts: Array<string>): Promise<{

@@ -163,10 +163,8 @@ export function chunkText(
 		chunks.push({
 			text: currentChunk.trim(),
 			source,
-			chunkIndex: chunkIndex,
+			chunkIndex,
 		});
-		// chunkIndex incremented but not used further (end of function)
-		void chunkIndex;
 	}
 
 	return chunks;

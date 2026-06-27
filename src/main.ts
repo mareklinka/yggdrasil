@@ -106,11 +106,6 @@ export default class YggdrasilPlugin extends Plugin {
       for (const error of result.errors) {
         console.warn("Yggdrasil indexing error:", error);
       }
-    } else {
-      new Notice(
-        `✅ Indexed ${result.chunksCreated} chunks from ${result.filesScanned} notes`,
-        5000,
-      );
     }
   }
 
@@ -155,11 +150,7 @@ export default class YggdrasilPlugin extends Plugin {
         getMarkdownFiles: (): Array<TFile> => this.app.vault.getMarkdownFiles(),
         read: async (file: TFile): Promise<string> => this.app.vault.read(file),
       },
-      new Embedder({
-        endpoint: "http://127.0.0.1:10001",
-        model: "v5-small-retrieval-Q8_0.gguf",
-        dimensions: EMBEDDING_DIMENSIONS,
-      }),
+      new Embedder({ dimensions: EMBEDDING_DIMENSIONS }),
       fileSystem,
     );
     try {
