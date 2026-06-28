@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "session-history/session-01-the-spice-route.md",
+                "file": "Hello World.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "session-01-the-spice-route"
+              "title": "Hello World"
             }
           }
         ]
@@ -186,8 +186,8 @@
   },
   "active": "334c015e911e71f4",
   "lastOpenFiles": [
-    "Guild Master Voss.md",
     "session-history/session-01-the-spice-route.md",
+    "Guild Master Voss.md",
     "NPCs/blacksmith-thorin.md",
     "session-history/session-15-the-final-stand.md",
     "session-history/session-10-iron-corruption.md",

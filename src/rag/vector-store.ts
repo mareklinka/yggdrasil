@@ -15,7 +15,7 @@ import {
   save,
   search,
 } from "@orama/orama";
-import { deflate, inflate } from 'pako';
+import { deflate, inflate } from "pako";
 
 /** Represents a stored chunk with its embedding. */
 export interface StoredChunk {
@@ -74,7 +74,7 @@ export class VectorStore {
     dimensions: number;
   };
   readonly #fileSystem: FilePersistence;
-  #orama: AnyOrama | null = null;
+  #orama: AnyOrama;
 
   public constructor(config: VectorStoreConfig, fileSystem: FilePersistence) {
     this.#config = {
@@ -82,29 +82,7 @@ export class VectorStore {
       dimensions: config.dimensions ?? DEFAULT_DIMENSIONS,
     };
     this.#fileSystem = fileSystem;
-  }
-
-  /**
-   * Check if the database has been initialized.
-   * @returns True if the Orama instance is available.
-   */
-  public isInitialized(): boolean {
-    return this.#orama !== null;
-  }
-
-  /**
-   * Create and initialize a new Orama database with the correct schema.
-   */
-  public async createNew(): Promise<void> {
-    this.#orama = await create({
-      schema: {
-        id: "string",
-        text: "string",
-        source: "string",
-        chunkIndex: "number",
-        embedding: `vector[${this.#config.dimensions}]`,
-      },
-    });
+    this.#orama = this.#createNew();
   }
 
   /**
@@ -113,12 +91,7 @@ export class VectorStore {
    * Throws only if the file exists but is corrupted or unreadable.
    */
   public async initialize(): Promise<void> {
-    if (this.#orama === null) {
-      await this.createNew();
-    }
-
-    const exists = await this.#fileSystem.exists(this.#config.dbPath);
-    if (exists) {
+    if (await this.#fileSystem.exists(this.#config.dbPath)) {
       await this.loadFromDisk();
     }
   }
@@ -137,7 +110,9 @@ export class VectorStore {
       const json = inflate(new Uint8Array(compressed), { toText: true });
       const raw = JSON.parse(json) as RawData;
       load(this.#orama, raw);
-      console.log(`Vector store loaded from ${this.#config.dbPath}, containing ${await this.countChunks()} chunk(s).`);
+      console.log(
+        `Vector store loaded from ${this.#config.dbPath}, containing ${await this.countChunks()} chunk(s).`,
+      );
     } catch {
       throw new Error(
         `Failed to load vector store from ${this.#config.dbPath}. ` +
@@ -151,11 +126,16 @@ export class VectorStore {
    * Serializes the Orama instance and writes it to `dbPath`.
    */
   public async saveToDisk(): Promise<void> {
-    const raw = save(this.getOrama());
+    const raw = save(this.#orama);
     const json = JSON.stringify(raw, null, 2);
     const compressed = deflate(json, { level: -1 });
-    await this.#fileSystem.writeBinary(this.#config.dbPath, compressed.buffer as ArrayBuffer);
-    console.log(`Vector store persisted to ${this.#config.dbPath}, containing ${await this.countChunks()} chunk(s).`);
+    await this.#fileSystem.writeBinary(
+      this.#config.dbPath,
+      compressed.buffer as ArrayBuffer,
+    );
+    console.log(
+      `Vector store persisted to ${this.#config.dbPath}, containing ${await this.countChunks()} chunk(s).`,
+    );
   }
 
   /**
@@ -164,10 +144,7 @@ export class VectorStore {
    *
    * @returns The Orama instance.
    */
-  public getOrama(): AnyOrama {
-    if (this.#orama === null) {
-      throw new Error("VectorStore not initialized. Call initialize() first.");
-    }
+  public orama(): AnyOrama {
     return this.#orama;
   }
 
@@ -177,7 +154,6 @@ export class VectorStore {
    * @param chunks - Array of chunks with embeddings to insert.
    */
   public async addChunks(chunks: Array<StoredChunk>): Promise<void> {
-    const orama = this.getOrama();
     const docs = chunks.map((chunk) => ({
       id: chunk.id,
       text: chunk.text,
@@ -185,7 +161,7 @@ export class VectorStore {
       chunkIndex: chunk.chunkIndex,
       embedding: chunk.embedding,
     }));
-    await insertMultiple(orama, docs);
+    await insertMultiple(this.#orama, docs);
   }
 
   /**
@@ -194,8 +170,7 @@ export class VectorStore {
    * @param id - The chunk ID to remove.
    */
   public async removeChunk(id: string): Promise<void> {
-    const orama = this.getOrama();
-    await remove(orama, id);
+    await remove(this.#orama, id);
   }
 
   /**
@@ -205,15 +180,16 @@ export class VectorStore {
    * @returns The number of chunks removed.
    */
   public async removeBySource(filePath: string): Promise<number> {
-    const orama = this.getOrama();
-    const results = await search(orama, {
+    // Use fulltext search with empty term and where clause to filter by source field only
+    const results = await search(this.#orama, {
       mode: "fulltext",
       term: filePath,
-      limit: 10000,
+      properties: ["source"],
+      exact: true,
     });
     let removed = 0;
     for (const hit of results.hits) {
-      await remove(orama, hit.id);
+      await remove(this.#orama, hit.id);
       removed++;
     }
     return removed;
@@ -223,16 +199,8 @@ export class VectorStore {
    * Remove all chunks from the store.
    */
   public async clear(): Promise<void> {
-    const orama = this.getOrama();
-    // Get all document IDs via fulltext search and remove them
-    const allDocs = await search(orama, {
-      mode: "fulltext",
-      term: "",
-      limit: 10000,
-    });
-    for (const hit of allDocs.hits) {
-      await remove(orama, hit.id);
-    }
+    this.#orama = this.#createNew();
+    this.saveToDisk();
   }
 
   /**
@@ -248,8 +216,7 @@ export class VectorStore {
     limit: number = 10,
     similarity: number = 0,
   ): Promise<Array<SearchMatch>> {
-    const orama = this.getOrama();
-    const results = await search(orama, {
+    const results = await search(this.#orama, {
       mode: "vector",
       vector: {
         value: vector,
@@ -272,13 +239,18 @@ export class VectorStore {
    * @returns The number of chunks.
    */
   public async countChunks(): Promise<number> {
-    return count(this.getOrama());
+    return count(this.#orama);
   }
 
-  /**
-   * Close the store and release resources.
-   */
-  public async close(): Promise<void> {
-    this.#orama = null;
+  #createNew(): AnyOrama {
+    return create({
+      schema: {
+        id: "string",
+        text: "string",
+        source: "string",
+        chunkIndex: "number",
+        embedding: `vector[${this.#config.dimensions}]`,
+      },
+    });
   }
 }

@@ -66,6 +66,7 @@ export default class YggdrasilPlugin extends Plugin {
       }
 
       this.#indexer?.cancelPending();
+      this.#indexer?.vectorStore.clear();
       this.app.vault.getMarkdownFiles().forEach((file) => {
         indexer.enqueueEdit(file);
       });

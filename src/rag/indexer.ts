@@ -92,11 +92,15 @@ export class Indexer {
   readonly #embedder: Embedder;
   readonly #vault: VaultAdapter;
   readonly #fileSystem: FilePersistence;
-  #store: VectorStore | null = null;
+  readonly #store: VectorStore;
 
   // Queue management
   #queue: Array<QueueItem> = [];
   #processing = false;
+
+  public get vectorStore(): VectorStore {
+    return this.#store;
+  }
 
   public constructor(
     config: IndexerConfig,
@@ -108,12 +112,7 @@ export class Indexer {
     this.#vault = vault;
     this.#embedder = embedder;
     this.#fileSystem = fileSystem;
-  }
 
-  /**
-   * Initialize the vector store by loading from disk, or creating a new one.
-   */
-  public async initialize(): Promise<void> {
     const store = new VectorStore(
       {
         dbPath: this.#config.dbPath,
@@ -122,14 +121,13 @@ export class Indexer {
       this.#fileSystem,
     );
     this.#store = store;
-    await store.initialize();
   }
 
   /**
-   * Check whether the indexer has been initialized.
+   * Initialize the vector store by loading from disk, or creating a new one.
    */
-  public isInitialized(): boolean {
-    return this.#store !== null;
+  public async initialize(): Promise<void> {
+    await this.#store.initialize();
   }
 
   /**
@@ -140,8 +138,12 @@ export class Indexer {
    */
   public enqueueEdit(file: TFile): void {
     // Skip if already pending or currently being processed
-    if (this.#queue.some(item => item.file.path === file.path && item.operation === "modify")) {
-      console.info('Skipping file indexing for file', file.path);
+    if (
+      this.#queue.some(
+        (item) => item.file.path === file.path && item.operation === "modify",
+      )
+    ) {
+      console.info("Skipping file indexing for file", file.path);
       return;
     }
 
@@ -166,7 +168,11 @@ export class Indexer {
    * @param newFile - The file object at the new path.
    * @param newContent - The current file content at the new path.
    */
-  public enqueueRename(oldPath: string, newFile: TFile, newContent: string): void {
+  public enqueueRename(
+    oldPath: string,
+    newFile: TFile,
+    newContent: string,
+  ): void {
     this.#enqueueFile(newFile, "rename", newContent, oldPath);
     this.#startProcessorIfNeeded();
   }
@@ -227,14 +233,21 @@ export class Indexer {
           }
           case "rename": {
             if (item.oldPath !== undefined && item.content !== undefined) {
-              await this.#processFileRename(item.oldPath, item.file, item.content);
+              await this.#processFileRename(
+                item.oldPath,
+                item.file,
+                item.content,
+              );
             }
             break;
           }
         }
         this.#store?.saveToDisk();
       } catch (error) {
-        console.error(`Error processing ${item.operation} for ${item.file.path}:`, error);
+        console.error(
+          `Error processing ${item.operation} for ${item.file.path}:`,
+          error,
+        );
       }
     }
 
@@ -242,11 +255,6 @@ export class Indexer {
   }
 
   async #processFileModify(file: TFile, content?: string): Promise<void> {
-    const vectorStore = this.#store;
-    if (vectorStore === null) {
-      throw new Error("Indexer not initialized. Call initialize() first.");
-    }
-
     // Read content from vault if not pre-provided (full reindex path)
     if (content === undefined) {
       try {
@@ -276,33 +284,29 @@ export class Indexer {
     if (embedErrors.length > 0) {
       for (const err of embedErrors) {
         const snippet = err.text.slice(0, 50);
-        console.error(`Embedding failed for ${file.path} (chunk ${snippet}...): ${err.message}`);
+        console.error(
+          `Embedding failed for ${file.path} (chunk ${snippet}...): ${err.message}`,
+        );
       }
     }
 
     // Store the embeddings
     if (embeddings.length > 0) {
-      const storedChunks: Array<StoredChunk> = embeddings.map(
-        (emb, idx) => ({
-          id: `${file.path}__${chunks[idx].chunkIndex}`,
-          text: emb.text,
-          embedding: emb.embedding,
-          source: file.path,
-          chunkIndex: chunks[idx].chunkIndex,
-        }),
-      );
+      const storedChunks: Array<StoredChunk> = embeddings.map((emb, idx) => ({
+        id: `${file.path}__${chunks[idx].chunkIndex}`,
+        text: emb.text,
+        embedding: emb.embedding,
+        source: file.path,
+        chunkIndex: chunks[idx].chunkIndex,
+      }));
 
-      await vectorStore.addChunks(storedChunks);
+      await this.#store.removeBySource(file.path);
+      await this.#store.addChunks(storedChunks);
     }
   }
 
   async #processFileDelete(filePath: string): Promise<void> {
-    const vectorStore = this.#store;
-    if (vectorStore === null) {
-      throw new Error("Indexer not initialized. Call initialize() first.");
-    }
-
-    await vectorStore.removeBySource(filePath);
+    await this.#store.removeBySource(filePath);
   }
 
   async #processFileRename(
@@ -322,4 +326,3 @@ export class Indexer {
     await this.#processFileModify(newFile, newContent);
   }
 }
-

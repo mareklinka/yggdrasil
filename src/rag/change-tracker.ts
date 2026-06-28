@@ -111,13 +111,6 @@ export class ChangeTracker {
     file: TFile,
     oldPath?: string,
   ): void {
-    // Check indexer is initialized (throw if not - programming error)
-    if (!this.#indexer.isInitialized()) {
-      throw new Error(
-        "File event received before indexer was initialized. This is a bug.",
-      );
-    }
-
     // Clear existing debounce timer
     if (this.#debounceTimer !== null) {
       clearTimeout(this.#debounceTimer);
