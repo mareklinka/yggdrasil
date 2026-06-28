@@ -199,6 +199,27 @@ export class VectorStore {
   }
 
   /**
+   * Remove all chunks whose source matches the given file path.
+   * Uses fulltext search to find matching documents, then removes each by ID.
+   * @param filePath - The vault-relative source path.
+   * @returns The number of chunks removed.
+   */
+  public async removeBySource(filePath: string): Promise<number> {
+    const orama = this.getOrama();
+    const results = await search(orama, {
+      mode: "fulltext",
+      term: filePath,
+      limit: 10000,
+    });
+    let removed = 0;
+    for (const hit of results.hits) {
+      await remove(orama, hit.id);
+      removed++;
+    }
+    return removed;
+  }
+
+  /**
    * Remove all chunks from the store.
    */
   public async clear(): Promise<void> {

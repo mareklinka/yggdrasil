@@ -1,6 +1,10 @@
 /**
  * Indexing orchestrator that coordinates vault scanning, chunking,
  * embedding, and vector storage for the RAG pipeline.
+ *
+ * Uses a unified queue-based processor: both full reindex and
+ * incremental file operations enqueue work items that are processed
+ * sequentially by a single async processor loop.
  */
 
 import type { TFile } from "obsidian";
@@ -64,8 +68,24 @@ export interface VaultAdapter {
   read: (file: TFile) => Promise<string>;
 }
 
+/** Internal queue item for a file indexing operation. */
+interface QueueItem {
+  /** The file to process. */
+  file: TFile;
+  /** The file content (for modify/rename operations). */
+  content?: string;
+  /** The operation type. */
+  operation: "modify" | "delete" | "rename";
+  /** Previous path for rename operations. */
+  oldPath?: string;
+}
+
 /**
  * RAG indexer that orchestrates the full indexing pipeline.
+ *
+ * Uses a unified queue-based processor: both full reindex and
+ * incremental file operations enqueue work items that are processed
+ * sequentially by a single async processor loop.
  */
 export class Indexer {
   readonly #config: IndexerConfig;
@@ -73,6 +93,10 @@ export class Indexer {
   readonly #vault: VaultAdapter;
   readonly #fileSystem: FilePersistence;
   #store: VectorStore | null = null;
+
+  // Queue management
+  #queue: Array<QueueItem> = [];
+  #processing = false;
 
   public constructor(
     config: IndexerConfig,
@@ -102,160 +126,200 @@ export class Indexer {
   }
 
   /**
-   * Perform a full reindex of the vault.
-   *
-   * This method:
-   * 1. Scans the vault for markdown files
-   * 2. Reads each file's content
-   * 3. Chunks the content
-   * 4. Embeds the chunks
-   * 5. Stores them in Orama
-   *
-   * @param onProgress - Callback for progress updates.
-   * @returns The index result.
+   * Check whether the indexer has been initialized.
    */
-  public async reindex(onProgress: ProgressCallback): Promise<IndexResult> {
-    const progress: IndexProgress = {
-      current: 0,
-      total: 0,
-      currentFile: "",
-      chunksCreated: 0,
-      embeddingsGenerated: 0,
-      errors: [],
-      phase: "scanning",
-    };
+  public isInitialized(): boolean {
+    return this.#store !== null;
+  }
 
-    let filesScanned = 0;
-    let totalChunks = 0;
-    let totalEmbeddings = 0;
-    const allErrors: Array<string> = [];
-
-    try {
-      // Phase 1: Scan vault for markdown files
-      onProgress({ ...progress });
-
-      const files = this.#vault.getMarkdownFiles();
-      progress.total = files.length;
-      progress.phase = "indexing";
-      onProgress({ ...progress });
-
-      // Phase 2: Clear the vector store to start fresh
-      const vectorStore = this.#store;
-      if (vectorStore === null) {
-        throw new Error("Indexer not initialized. Call initialize() first.");
-      }
-      await vectorStore.clear();
-      onProgress({ ...progress, phase: "storing" });
-
-      // Phase 3: Process each file
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        const filePath = file.path;
-
-        // Read file content
-        let content: string;
-        try {
-          content = await this.#vault.read(file);
-        } catch {
-          const errorMsg = `Failed to read: ${filePath}`;
-          allErrors.push(errorMsg);
-          progress.errors = [...allErrors];
-          progress.current = i + 1;
-          progress.currentFile = filePath;
-          onProgress({ ...progress });
-          continue;
-        }
-
-        filesScanned++;
-
-        // Skip empty files
-        if (!content || content.trim().length === 0) {
-          progress.current = i + 1;
-          progress.currentFile = filePath;
-          onProgress({ ...progress });
-          continue;
-        }
-
-        // Chunk the content
-        const chunks = chunkText(content, filePath);
-        if (chunks.length === 0) {
-          progress.current = i + 1;
-          progress.currentFile = filePath;
-          onProgress({ ...progress });
-          continue;
-        }
-
-        totalChunks += chunks.length;
-        progress.chunksCreated = totalChunks;
-        progress.current = i + 1;
-        progress.currentFile = filePath;
-        onProgress({ ...progress });
-
-        // Embed the chunks
-        const chunkTexts = chunks.map((c) => c.text);
-        const { results: embeddings, errors: embedErrors } =
-          await this.#embedder.embedMany(chunkTexts);
-
-        totalEmbeddings += embeddings.length;
-        progress.embeddingsGenerated = totalEmbeddings;
-
-        if (embedErrors.length > 0) {
-          for (const err of embedErrors) {
-            const snippet = err.text.slice(0, 50);
-            allErrors.push(
-              `Embedding failed for ${filePath} (chunk ${snippet}...): ${err.message}`,
-            );
-          }
-          progress.errors = [...allErrors];
-        }
-
-        // Store the embeddings
-        if (embeddings.length > 0) {
-          const storedChunks: Array<StoredChunk> = embeddings.map(
-            (emb, idx) => ({
-              id: `${filePath}__${chunks[idx].chunkIndex}`,
-              text: emb.text,
-              embedding: emb.embedding,
-              source: filePath,
-              chunkIndex: chunks[idx].chunkIndex,
-            }),
-          );
-
-          await vectorStore.addChunks(storedChunks);
-        }
-
-        // Report progress
-        onProgress({ ...progress });
-      }
-
-      // Phase 4: Persist the vector store to disk
-      await vectorStore.saveToDisk();
-
-      progress.phase = "complete";
-      onProgress({ ...progress });
-
-      return {
-        filesScanned,
-        chunksCreated: totalChunks,
-        embeddingsGenerated: totalEmbeddings,
-        errors: allErrors,
-        success: true,
-      };
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : "Unknown error";
-      progress.phase = "error";
-      progress.errorMessage = errorMessage;
-      onProgress({ ...progress });
-
-      return {
-        filesScanned,
-        chunksCreated: totalChunks,
-        embeddingsGenerated: totalEmbeddings,
-        errors: [...allErrors, errorMessage],
-        success: false,
-      };
+  /**
+   * Enqueue a single file for incremental reindexing.
+   * If the file is already pending in the queue, it is not added again.
+   *
+   * @param file - The file to enqueue.
+   */
+  public enqueueEdit(file: TFile): void {
+    // Skip if already pending or currently being processed
+    if (this.#queue.some(item => item.file.path === file.path && item.operation === "modify")) {
+      console.info('Skipping file indexing for file', file.path);
+      return;
     }
+
+    this.#enqueueFile(file, "modify");
+    this.#startProcessorIfNeeded();
+  }
+
+  /**
+   * Enqueue a file deletion.
+   *
+   * @param file - The file to delete.
+   */
+  public enqueueDelete(file: TFile): void {
+    this.#enqueueFile(file, "delete");
+    this.#startProcessorIfNeeded();
+  }
+
+  /**
+   * Enqueue a file rename operation.
+   *
+   * @param oldPath - The previous vault-relative path.
+   * @param newFile - The file object at the new path.
+   * @param newContent - The current file content at the new path.
+   */
+  public enqueueRename(oldPath: string, newFile: TFile, newContent: string): void {
+    this.#enqueueFile(newFile, "rename", newContent, oldPath);
+    this.#startProcessorIfNeeded();
+  }
+
+  /**
+   * Cancel all pending queue operations.
+   * Called when a full reindex is about to start.
+   */
+  public cancelPending(): void {
+    this.#queue = [];
+    this.#processing = false;
+  }
+
+  /**
+   * Check if the queue is currently being processed.
+   */
+  public isProcessing(): boolean {
+    return this.#processing;
+  }
+
+  /**
+   * Get the current number of items in the queue.
+   */
+  public getQueueLength(): number {
+    return this.#queue.length;
+  }
+
+  #enqueueFile(
+    file: TFile,
+    operation: "modify" | "delete" | "rename",
+    content?: string,
+    oldPath?: string,
+  ): void {
+    this.#queue.push({ file, content, operation, oldPath });
+  }
+
+  #startProcessorIfNeeded(): void {
+    if (!this.#processing && this.#queue.length > 0) {
+      this.#processing = true;
+      this.#processNext();
+    }
+  }
+
+  async #processNext(): Promise<void> {
+    while (this.#queue.length > 0) {
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+      const item = this.#queue.shift()!;
+
+      try {
+        switch (item.operation) {
+          case "modify": {
+            await this.#processFileModify(item.file, item.content);
+            break;
+          }
+          case "delete": {
+            await this.#processFileDelete(item.file.path);
+            break;
+          }
+          case "rename": {
+            if (item.oldPath !== undefined && item.content !== undefined) {
+              await this.#processFileRename(item.oldPath, item.file, item.content);
+            }
+            break;
+          }
+        }
+        this.#store?.saveToDisk();
+      } catch (error) {
+        console.error(`Error processing ${item.operation} for ${item.file.path}:`, error);
+      }
+    }
+
+    this.#processing = false;
+  }
+
+  async #processFileModify(file: TFile, content?: string): Promise<void> {
+    const vectorStore = this.#store;
+    if (vectorStore === null) {
+      throw new Error("Indexer not initialized. Call initialize() first.");
+    }
+
+    // Read content from vault if not pre-provided (full reindex path)
+    if (content === undefined) {
+      try {
+        content = await this.#vault.read(file);
+      } catch {
+        console.error(`Failed to read file content for ${file.path}`);
+        return;
+      }
+    }
+
+    // Skip empty files
+    if (!content || content.trim().length === 0) {
+      return;
+    }
+
+    // Chunk the content
+    const chunks = chunkText(content, file.path);
+    if (chunks.length === 0) {
+      return;
+    }
+
+    // Embed the chunks
+    const chunkTexts = chunks.map((c) => c.text);
+    const { results: embeddings, errors: embedErrors } =
+      await this.#embedder.embedMany(chunkTexts);
+
+    if (embedErrors.length > 0) {
+      for (const err of embedErrors) {
+        const snippet = err.text.slice(0, 50);
+        console.error(`Embedding failed for ${file.path} (chunk ${snippet}...): ${err.message}`);
+      }
+    }
+
+    // Store the embeddings
+    if (embeddings.length > 0) {
+      const storedChunks: Array<StoredChunk> = embeddings.map(
+        (emb, idx) => ({
+          id: `${file.path}__${chunks[idx].chunkIndex}`,
+          text: emb.text,
+          embedding: emb.embedding,
+          source: file.path,
+          chunkIndex: chunks[idx].chunkIndex,
+        }),
+      );
+
+      await vectorStore.addChunks(storedChunks);
+    }
+  }
+
+  async #processFileDelete(filePath: string): Promise<void> {
+    const vectorStore = this.#store;
+    if (vectorStore === null) {
+      throw new Error("Indexer not initialized. Call initialize() first.");
+    }
+
+    await vectorStore.removeBySource(filePath);
+  }
+
+  async #processFileRename(
+    oldPath: string,
+    newFile: TFile,
+    newContent: string,
+  ): Promise<void> {
+    const vectorStore = this.#store;
+    if (vectorStore === null) {
+      throw new Error("Indexer not initialized. Call initialize() first.");
+    }
+
+    // Remove old chunks
+    await vectorStore.removeBySource(oldPath);
+
+    // Re-index at new path
+    await this.#processFileModify(newFile, newContent);
   }
 }
 
