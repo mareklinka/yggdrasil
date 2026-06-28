@@ -15,6 +15,7 @@ import {
   save,
   search,
 } from "@orama/orama";
+import { deflate, inflate } from 'pako';
 
 /** Represents a stored chunk with its embedding. */
 export interface StoredChunk {
@@ -42,8 +43,12 @@ export interface SearchMatch {
 export interface FilePersistence {
   /** Write text content to a file, creating parent directories as needed. */
   write(filePath: string, content: string): Promise<void>;
+  /** Write binary content to a file, creating parent directories as needed. */
+  writeBinary(filePath: string, content: ArrayBuffer): Promise<void>;
   /** Read text content from a file. */
   read(filePath: string): Promise<string>;
+  /** Read binary content from a file. */
+  readBinary(filePath: string): Promise<ArrayBuffer>;
   /** Check whether a file exists. */
   exists(filePath: string): Promise<boolean>;
 }
@@ -128,8 +133,9 @@ export class VectorStore {
     }
 
     try {
-      const rawJson = await this.#fileSystem.read(this.#config.dbPath);
-      const raw = JSON.parse(rawJson) as RawData;
+      const compressed = await this.#fileSystem.readBinary(this.#config.dbPath);
+      const json = inflate(new Uint8Array(compressed), { toText: true });
+      const raw = JSON.parse(json) as RawData;
       load(this.#orama, raw);
       console.log(`Vector store loaded from ${this.#config.dbPath}, containing ${await this.countChunks()} chunk(s).`);
     } catch {
@@ -147,7 +153,8 @@ export class VectorStore {
   public async saveToDisk(): Promise<void> {
     const raw = save(this.getOrama());
     const json = JSON.stringify(raw, null, 2);
-    await this.#fileSystem.write(this.#config.dbPath, json);
+    const compressed = deflate(json, { level: -1 });
+    await this.#fileSystem.writeBinary(this.#config.dbPath, compressed.buffer as ArrayBuffer);
     console.log(`Vector store persisted to ${this.#config.dbPath}, containing ${await this.countChunks()} chunk(s).`);
   }
 

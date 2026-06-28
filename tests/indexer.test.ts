@@ -112,7 +112,6 @@ describe('Indexer', () => {
 			// Verify vector store operations
 		expect(mocks.mockVectorStore.createNew).toHaveBeenCalledTimes(1);
 		expect(mocks.mockVectorStore.addChunks).toHaveBeenCalled();
-		expect(mocks.mockVectorStore.close).toHaveBeenCalledTimes(1);
 		});
 
 		it('should handle empty vault', async () => {

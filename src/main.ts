@@ -138,8 +138,27 @@ export default class YggdrasilPlugin extends Plugin {
 
         await vault.adapter.write(filePath, content);
       },
+      writeBinary: async (filePath: string, content: ArrayBuffer): Promise<void> => {
+        // Check if the file exists; if not, create parent directories first
+        const parentPath = filePath.substring(0, filePath.lastIndexOf("/"));
+        if (parentPath && !(await vault.adapter.exists(parentPath))) {
+          // Recursively create parent folders
+          const parts = parentPath.split("/");
+          let currentPath = "";
+          for (const part of parts) {
+            currentPath = currentPath ? `${currentPath}/${part}` : part;
+            if (!(await vault.adapter.exists(currentPath))) {
+              await vault.createFolder(currentPath);
+            }
+          }
+        }
+
+        await vault.adapter.writeBinary(filePath, content);
+      },
       read: async (filePath: string): Promise<string> =>
         await vault.adapter.read(filePath),
+      readBinary: async (filePath: string): Promise<ArrayBuffer> =>
+        await vault.adapter.readBinary(filePath),
       exists: async (filePath: string): Promise<boolean> =>
         await vault.adapter.exists(filePath),
     };
@@ -150,7 +169,15 @@ export default class YggdrasilPlugin extends Plugin {
         getMarkdownFiles: (): Array<TFile> => this.app.vault.getMarkdownFiles(),
         read: async (file: TFile): Promise<string> => this.app.vault.read(file),
       },
-      new Embedder({ dimensions: EMBEDDING_DIMENSIONS }),
+      new Embedder(
+        {
+          endpoint: "http://127.0.0.1:10001",
+          model: "v5-small-retrieval-Q8_0.gguf",
+          dimensions: 1024,
+        },
+        1000,
+        0,
+      ),
       fileSystem,
     );
     try {

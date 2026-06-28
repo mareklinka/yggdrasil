@@ -16,13 +16,6 @@ export interface EmbedderConfig {
 	dimensions: number;
 }
 
-/** Default hard-coded configuration for this version. */
-const DEFAULT_CONFIG: EmbedderConfig = {
-	endpoint: 'http://localhost:10001',
-	model: 'v5-small-retrieval-Q8_0.gguf',
-	dimensions: 1024,
-};
-
 /** Request body for the embedding API. */
 interface EmbeddingRequest {
 	model: string;
@@ -79,11 +72,11 @@ export class Embedder {
 	readonly #requestDelayMs: number;
 
 	public constructor(
-		config: Partial<EmbedderConfig> = {},
+		config: EmbedderConfig,
 		batchSize: number = 100,
 		requestDelayMs: number = 100
 	) {
-		this.#config = { ...DEFAULT_CONFIG, ...config };
+		this.#config = { ...config };
 		this.#batchSize = batchSize;
 		this.#requestDelayMs = requestDelayMs;
 	}
@@ -197,6 +190,7 @@ export class Embedder {
 			const parsedResponse = response.json as EmbeddingResponse;
 			return parsedResponse;
 		} catch (error) {
+			console.error('Embedding request failed:', error);
 			if (error instanceof Error) {
 				console.error('Embedding request failed:', error);
 				throw new Error(`Embedding request failed: ${error.message}`, {
@@ -227,13 +221,4 @@ export class Embedder {
 	public getConfig(): EmbedderConfig {
 		return { ...this.#config };
 	}
-}
-
-/**
- * Create a default embedder instance.
- *
- * @returns A new Embedder instance with default configuration.
- */
-export function createEmbedder(): Embedder {
-	return new Embedder();
 }

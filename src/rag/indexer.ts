@@ -97,8 +97,8 @@ export class Indexer {
       },
       this.#fileSystem,
     );
-    await store.initialize();
     this.#store = store;
+    await store.initialize();
   }
 
   /**
@@ -230,7 +230,6 @@ export class Indexer {
 
       // Phase 4: Persist the vector store to disk
       await vectorStore.saveToDisk();
-      await vectorStore.close();
 
       progress.phase = "complete";
       onProgress({ ...progress });
