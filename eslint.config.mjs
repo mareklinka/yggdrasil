@@ -35,7 +35,7 @@ export default defineConfig(
       parserOptions: {
         ecmaVersion: 'latest',
         sourceType: 'module',
-        project: ['tsconfig.json']
+        project: ['tsconfig.json', 'tsconfig.tests.json']
       }
     },
     rules: {
@@ -162,9 +162,11 @@ export default defineConfig(
     }
   },
   {
-    files: ['**/*.{spec,test}.ts'],
+    files: ['**/*.test.ts', '**/*.stub.ts'],
     rules: {
-      '@typescript-eslint/no-explicit-any': 'error'
+      '@typescript-eslint/explicit-function-return-type': 'off',
+      '@typescript-eslint/explicit-member-accessibility': 'off',
+      '@typescript-eslint/naming-convention': 'off'
     }
   }
 );

@@ -22,7 +22,7 @@ export const Modal = class {
 
 export const Notice = class {
 	constructor(public message: string, public timeout?: number) {}
-	setMessage(msg: string) {}
+	setMessage(_msg: string) {}
 	hide() {}
 };
 

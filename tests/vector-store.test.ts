@@ -6,6 +6,7 @@ import { VectorStore } from '../src/rag/vector-store';
 // In-memory file system mock for tests
 function createMockFileSystem(): FilePersistence {
 	const files = new Map<string, string>();
+	const binaryFiles = new Map<string, ArrayBuffer>();
 	return {
 		write: async (filePath: string, content: string): Promise<void> => {
 			files.set(filePath, content);
@@ -15,11 +16,21 @@ function createMockFileSystem(): FilePersistence {
 			if (content === undefined) {
 				throw new Error(`File not found: ${filePath}`);
 			}
+
 			return content;
 		},
-		exists: async (filePath: string): Promise<boolean> => {
-			return files.has(filePath);
+		writeBinary: async (filePath: string, content: ArrayBuffer): Promise<void> => {
+			binaryFiles.set(filePath, content);
 		},
+		readBinary: async (filePath: string): Promise<ArrayBuffer> => {
+			const content = binaryFiles.get(filePath);
+			if (content === undefined) {
+				throw new Error(`File not found: ${filePath}`);
+			}
+
+			return content;
+		},
+		exists: async (filePath: string): Promise<boolean> => files.has(filePath) || binaryFiles.has(filePath),
 	};
 }
 

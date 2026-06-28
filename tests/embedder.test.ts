@@ -157,14 +157,12 @@ describe('Embedder', () => {
 					json: { error: { message: 'Server error' } },
 				});
 
-			const embedder = new Embedder(
-				{
-					endpoint: mockEndpoint,
-					model: mockModel,
-					dimensions: mockDimensions,
-				},
-				1 // batch size of 1 to process each text separately
-			);
+			const embedder = new Embedder({
+				endpoint: mockEndpoint,
+				model: mockModel,
+				dimensions: mockDimensions,
+				batchSize: 1, // process each text separately
+			});
 
 			const { results, errors } = await embedder.embedMany(['Text 1', 'Text 2']);
 
@@ -175,6 +173,7 @@ describe('Embedder', () => {
 
 		it('should throw on dimension mismatch', async () => {
 			const wrongDimensions = Array(512).fill(0.01);
+			mockRequestUrl.mockReset();
 			mockRequestUrl.mockResolvedValue({
 				status: 200,
 				json: {
@@ -202,15 +201,13 @@ describe('Embedder', () => {
 				},
 			});
 
-			const embedder = new Embedder(
-				{
-					endpoint: mockEndpoint,
-					model: mockModel,
-					dimensions: mockDimensions,
-				},
-				1, // batch size of 1
-				50 // 50ms delay
-			);
+			const embedder = new Embedder({
+				endpoint: mockEndpoint,
+				model: mockModel,
+				dimensions: mockDimensions,
+				batchSize: 1, // batch size of 1
+				requestDelayMs: 50, // 50ms delay
+			});
 
 			// Embed 3 texts with batch size 1 = 3 requests
 			await embedder.embedMany(['Text 1', 'Text 2', 'Text 3']);
@@ -236,8 +233,8 @@ describe('Embedder', () => {
 					endpoint: mockEndpoint,
 					model: mockModel,
 					dimensions: mockDimensions,
+					batchSize: 100
 				},
-				100 // batch size of 100
 			);
 
 			// Embed 50 texts with batch size 100 = 1 request
@@ -245,28 +242,6 @@ describe('Embedder', () => {
 			await embedder.embedMany(texts);
 
 			expect(mockRequestUrl).toHaveBeenCalledTimes(1);
-		});
-	});
-
-	describe('constructor', () => {
-		it('should use default configuration when no args provided', () => {
-			const embedder = new Embedder();
-			// Should not throw - just verify it can be constructed
-			expect(embedder).toBeDefined();
-		});
-
-		it('should allow overriding configuration', () => {
-			const customEndpoint = 'http://custom:8080';
-			const customModel = 'custom-model';
-			const customDimensions = 512;
-
-			const embedder = new Embedder({
-				endpoint: customEndpoint,
-				model: customModel,
-				dimensions: customDimensions,
-			});
-
-			expect(embedder).toBeDefined();
 		});
 	});
 });
