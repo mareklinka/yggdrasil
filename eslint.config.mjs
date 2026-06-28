@@ -35,7 +35,7 @@ export default defineConfig(
       parserOptions: {
         ecmaVersion: 'latest',
         sourceType: 'module',
-        project: ['tsconfig.json', 'tsconfig.spec.json']
+        project: ['tsconfig.json']
       }
     },
     rules: {

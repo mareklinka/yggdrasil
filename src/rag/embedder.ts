@@ -14,6 +14,9 @@ export interface EmbedderConfig {
 	model: string;
 	/** The expected embedding vector dimension. */
 	dimensions: number;
+
+	batchSize?: number;
+	requestDelayMs?: number;
 }
 
 /** Request body for the embedding API. */
@@ -67,18 +70,12 @@ export interface EmbeddingError {
  * Uses Obsidian's requestUrl() which works in the plugin context.
  */
 export class Embedder {
-	readonly #config: EmbedderConfig;
-	readonly #batchSize: number;
-	readonly #requestDelayMs: number;
+	readonly #config: Required<EmbedderConfig>;
 
 	public constructor(
-		config: EmbedderConfig,
-		batchSize: number = 100,
-		requestDelayMs: number = 100
+		config: EmbedderConfig
 	) {
-		this.#config = { ...config };
-		this.#batchSize = batchSize;
-		this.#requestDelayMs = requestDelayMs;
+		this.#config = { requestDelayMs: 100, batchSize: 100, ...config };
 	}
 
 	/**
@@ -116,8 +113,8 @@ export class Embedder {
 		const errors: Array<EmbeddingError> = [];
 
 		// Process in batches
-		for (let i = 0; i < texts.length; i += this.#batchSize) {
-			const batch = texts.slice(i, i + this.#batchSize);
+		for (let i = 0; i < texts.length; i += this.#config.batchSize) {
+			const batch = texts.slice(i, i + this.#config.batchSize);
 
 			try {
 				const response = await this.#requestEmbeddings(batch);
@@ -149,8 +146,8 @@ export class Embedder {
 			}
 
 			// Apply delay between requests to avoid overwhelming the proxy
-			if (i + this.#batchSize < texts.length) {
-				await this.#delay(this.#requestDelayMs);
+			if (i + this.#config.batchSize < texts.length) {
+				await this.#delay(this.#config.requestDelayMs);
 			}
 		}
 
