@@ -18,7 +18,16 @@ All AI agents MUST follow the structured SDLC defined in [docs/sdlc.md](./sdlc.m
 
 **Phase transitions are HARD.** Never skip, merge, or bypass stages. The agent MUST enforce this workflow even without explicit user prompting.
 
-**Linting:** Run `npm run lint` after every code change. Fix all lint errors before proceeding. Use `npm run lint:fix` for auto-fixable issues, then manually review remaining warnings. Code MUST pass linting before any commit or PR.
+**Linting & Code Quality:** Run `npm run lint` after every code change. Fix all lint errors before proceeding. Use `npm run lint:fix` for auto-fixable issues, then manually review remaining warnings. Code MUST pass linting before any commit or PR.
+
+**SOLID Principles:** All code MUST follow the five SOLID principles:
+- **Single Responsibility** — each class, module, or function has one reason to change.
+- **Open/Closed** — entities are open for extension but closed for modification.
+- **Liskov Substitution** — derived types are substitutable for their base types without altering correctness.
+- **Interface Segregation** — clients are not forced to depend on interfaces they do not use.
+- **Dependency Inversion** — high-level modules do not depend on low-level modules; both depend on abstractions.
+
+**ESLint:** All code MUST adhere to the project's ESLint rules (`eslint.config.mjs`). Do not disable or work around lint rules unless explicitly justified and documented.
 
 ---
 

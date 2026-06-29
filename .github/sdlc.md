@@ -146,6 +146,18 @@ Every time the workflow moves from one stage to the next, the agent MUST:
 
 ---
 
+## Code Quality Standards
+
+All code produced during this SDLC MUST adhere to the following standards:
+
+- **SOLID Principles.** Every piece of code must follow the five SOLID principles:
+  - **S**ingle Responsibility — each class, module, or function should have one reason to change.
+  - **O**pen/Closed — entities should be open for extension but closed for modification.
+  - **L**iskov Substitution — derived types must be substitutable for their base types without altering correctness.
+  - **I**nterface Segregation — clients should not be forced to depend on interfaces they do not use.
+  - **D**ependency Inversion — high-level modules must not depend on low-level modules; both should depend on abstractions.
+- **ESLint Rules.** All code MUST pass the project's ESLint configuration (`eslint.config.mjs`). Do not ignore, disable, or work around lint rules unless explicitly justified and documented. Use `npm run lint` to verify and `npm run lint:fix` for auto-fixable issues.
+
 ## SDLC Rules
 
 1. **Phase transitions are HARD.** Never skip or merge stages.
@@ -154,6 +166,7 @@ Every time the workflow moves from one stage to the next, the agent MUST:
 4. **The agent MUST adhere to this SDLC** even if the user does not explicitly mention it.
 5. **User validation gates progression.** Stages 3→4 and 5→6 require explicit user confirmation.
 6. **Commit at every stage boundary.** The user MUST commit changes before the agent proceeds to the next stage.
+7. **Code quality is mandatory.** All code must follow SOLID principles and pass ESLint rules without exceptions.
 
 ---
 
