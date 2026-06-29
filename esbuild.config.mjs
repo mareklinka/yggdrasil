@@ -20,12 +20,19 @@ const plugins = [
         const manifestTarget = path.relative(VAULT_PLUGIN_DIR, path.resolve(outdir, 'manifest.json'));
         fs.rmSync(path.join(VAULT_PLUGIN_DIR, 'manifest.json'), { force: true });
         fs.symlinkSync(manifestTarget, path.join(VAULT_PLUGIN_DIR, 'manifest.json'), 'file');
-        // Symlink styles.css if it exists (relative path)
+        // Copy styles.css to dist/ if it exists
         const stylesPath = path.join('src', 'styles.css');
         if (fs.existsSync(stylesPath)) {
+          fs.cpSync(stylesPath, path.join(outdir, 'styles.css'), { force: true });
+          // Symlink styles.css to vault plugin dir (relative path)
           const stylesTarget = path.relative(VAULT_PLUGIN_DIR, path.resolve(outdir, 'styles.css'));
           fs.rmSync(path.join(VAULT_PLUGIN_DIR, 'styles.css'), { force: true });
           fs.symlinkSync(stylesTarget, path.join(VAULT_PLUGIN_DIR, 'styles.css'), 'file');
+        }
+        // Copy manifest.json to dist/ if it exists
+        const manifestPath = path.join('manifest.json');
+        if (fs.existsSync(manifestPath)) {
+          fs.cpSync(manifestPath, path.join(outdir, 'manifest.json'), { force: true });
         }
       });
     },
