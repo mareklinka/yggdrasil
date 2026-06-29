@@ -1,10 +1,14 @@
 import type { TFile, WorkspaceLeaf } from "obsidian";
 import { Notice, Plugin } from "obsidian";
 
-import { ChangeTracker } from "./rag/change-tracker";
-import { Embedder } from "./rag/embedder";
-import { Indexer, type IndexerConfig } from "./rag/indexer";
-import { VaultFileSystem } from "./rag/vault-file-system";
+import { getChangeTracker, initChangeTracker } from "./rag/change-tracker";
+import { initEmbedder } from "./rag/embedder";
+import { getIndexer, type IndexerConfig,initIndexer } from "./rag/indexer";
+import {
+  getVaultFileSystem,
+  initVaultFileSystem,
+} from "./rag/vault-file-system";
+import { getVectorStore, initVectorStoreStore } from "./rag/vector-store";
 import { CHAT_VIEW_TYPE, ChatView } from "./ui/chat-view";
 import { ReindexConfirmationModal } from "./ui/reindex-confirmation-modal";
 
@@ -12,8 +16,6 @@ const EMBEDDING_DIMENSIONS = 1024;
 const VECTOR_DB_FILE = "vectors.json";
 
 export default class YggdrasilPlugin extends Plugin {
-  #indexer: Indexer | null = null;
-  #changeTracker: ChangeTracker | null = null;
   #isReindexing = false;
 
   public async onload(): Promise<void> {
@@ -30,15 +32,20 @@ export default class YggdrasilPlugin extends Plugin {
     });
 
     // Register chat view
-    this.registerView(CHAT_VIEW_TYPE, (leaf: WorkspaceLeaf) => new ChatView(leaf));
+    this.registerView(
+      CHAT_VIEW_TYPE,
+      (leaf: WorkspaceLeaf) => new ChatView(leaf),
+    );
 
     const openChat = (): void => {
-      const leaves: Array<WorkspaceLeaf> = this.app.workspace.getLeavesOfType(CHAT_VIEW_TYPE);
+      const leaves: Array<WorkspaceLeaf> =
+        this.app.workspace.getLeavesOfType(CHAT_VIEW_TYPE);
       if (leaves.length > 0) {
         // Reveal existing leaf (handles minimized/collapsed panes correctly)
         this.app.workspace.revealLeaf(leaves[0]);
       } else {
-        const leaf: WorkspaceLeaf | null = this.app.workspace.getRightLeaf(false);
+        const leaf: WorkspaceLeaf | null =
+          this.app.workspace.getRightLeaf(false);
         if (leaf !== null) {
           leaf.setViewState({ type: CHAT_VIEW_TYPE });
           this.app.workspace.revealLeaf(leaf);
@@ -63,12 +70,13 @@ export default class YggdrasilPlugin extends Plugin {
 
   public onunload(): void {
     // Detach all chat view leaves
-    const chatLeaves: Array<WorkspaceLeaf> = this.app.workspace.getLeavesOfType(CHAT_VIEW_TYPE);
+    const chatLeaves: Array<WorkspaceLeaf> =
+      this.app.workspace.getLeavesOfType(CHAT_VIEW_TYPE);
     chatLeaves.forEach((leaf: WorkspaceLeaf): void => {
       leaf.detach();
     });
 
-    this.#changeTracker?.unregisterEventListeners(this.app.vault);
+    getChangeTracker().unregisterEventListeners(this.app.vault);
     console.log("Yggdrasil plugin unloaded");
   }
 
@@ -89,18 +97,11 @@ export default class YggdrasilPlugin extends Plugin {
 
     try {
       this.#isReindexing = true;
-      const tracker = this.#changeTracker;
-      if (tracker === null) {
-        throw new Error("Change tracker not initialized");
-      }
 
-      const indexer = this.#indexer;
-      if (indexer === null) {
-        throw new Error("Indexer not initialized");
-      }
+      const indexer = getIndexer();
 
-      this.#indexer?.cancelPending();
-      this.#indexer?.vectorStore.clear();
+      indexer.cancelPending();
+      getVectorStore().clear();
       this.app.vault.getMarkdownFiles().forEach((file) => {
         indexer.enqueueEdit(file);
       });
@@ -119,23 +120,18 @@ export default class YggdrasilPlugin extends Plugin {
       dimensions: EMBEDDING_DIMENSIONS,
     };
 
-    this.#indexer = new Indexer(
-      config,
-      {
-        getMarkdownFiles: (): Array<TFile> => this.app.vault.getMarkdownFiles(),
-        read: async (file: TFile): Promise<string> => this.app.vault.read(file),
-      },
-      new Embedder({
-        endpoint: "http://127.0.0.1:10001",
-        model: "v5-small-retrieval-Q8_0.gguf",
-        dimensions: 1024,
-        batchSize: 1000,
-        requestDelayMs: 0,
-      }),
-      new VaultFileSystem(this.app.vault),
-    );
+    initVaultFileSystem(this.app.vault);
+    const vectorStore = initVectorStoreStore(config, getVaultFileSystem());
+    const embedder = initEmbedder({
+      endpoint: "http://127.0.0.1:10001",
+      model: "v5-small-retrieval-Q8_0.gguf",
+      dimensions: 1024,
+      batchSize: 1000,
+      requestDelayMs: 0,
+    });
+
     try {
-      await this.#indexer.initialize();
+      await vectorStore.initialize();
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
       console.error("Yggdrasil: Failed to initialize vector store:", message);
@@ -143,13 +139,14 @@ export default class YggdrasilPlugin extends Plugin {
       return;
     }
 
-    // Create and register the change tracker
-    this.#changeTracker = new ChangeTracker(this.#indexer, {
+    const indexer = initIndexer(this.app.vault, embedder, vectorStore);
+
+    const changeTracker = initChangeTracker(indexer, {
       read: async (file: TFile): Promise<string> => this.app.vault.read(file),
       getMarkdownFiles: (): Array<TFile> => this.app.vault.getMarkdownFiles(),
     });
 
     // Register file event listeners as the last step of initialization
-    this.#changeTracker.registerEventListeners(this.app.vault);
+    changeTracker.registerEventListeners(this.app.vault);
   }
 }

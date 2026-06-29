@@ -17,6 +17,26 @@ import {
 } from "@orama/orama";
 import { deflate, inflate } from "pako";
 
+export const { init: initVectorStoreStore, get: getVectorStore } = (function (): {
+  init: (this: void, config: VectorStoreConfig, fileSystem: FilePersistence) => VectorStore;
+  get: (this: void) => VectorStore;
+} {
+  let instance: VectorStore | null = null;
+
+  return {
+    init: function (this: void, config: VectorStoreConfig, fileSystem: FilePersistence): VectorStore {
+      return (instance ??= new VectorStore(config, fileSystem));
+    },
+    get: function (this: void): VectorStore {
+      if (!instance) {
+        throw new Error("VectorStore not initialized. Call init() first.");
+      }
+
+      return instance;
+    }
+  };
+})();
+
 /** Represents a stored chunk with its embedding. */
 export interface StoredChunk {
   /** Unique identifier: "<source>__<chunkIndex>". */
@@ -68,7 +88,7 @@ const DEFAULT_DIMENSIONS = 1024;
  * Orama vector store for managing text embeddings.
  * Uses Orama's save/load for persistence to a JSON file.
  */
-export class VectorStore {
+class VectorStore {
   readonly #config: {
     dbPath: string;
     dimensions: number;
@@ -116,7 +136,7 @@ export class VectorStore {
     } catch {
       throw new Error(
         `Failed to load vector store from ${this.#config.dbPath}. ` +
-          "The file may be missing or corrupted.",
+        "The file may be missing or corrupted.",
       );
     }
   }

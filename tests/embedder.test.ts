@@ -33,15 +33,27 @@ vi.mock('obsidian', () => ({
 	TFolder: class { path = ''; },
 }));
 
-import { Embedder } from '../src/rag/embedder';
+// Import the init/get singleton functions and type
+import { type EmbedderConfig } from '../src/rag/embedder';
 
 describe('Embedder', () => {
 	const mockEndpoint = 'http://localhost:10001';
 	const mockModel = 'v5-small-retrieval-Q8_0.gguf';
 	const mockDimensions = 1024;
 
+	function getEmbedderConfig(overrides?: Partial<EmbedderConfig>): EmbedderConfig {
+		return {
+			endpoint: mockEndpoint,
+			model: mockModel,
+			dimensions: mockDimensions,
+			...overrides,
+		};
+	}
+
 	beforeEach(() => {
 		vi.clearAllMocks();
+		// Reset singleton between tests by clearing the module cache
+		vi.resetModules();
 	});
 
 	afterEach(() => {
@@ -59,11 +71,9 @@ describe('Embedder', () => {
 				},
 			});
 
-			const embedder = new Embedder({
-				endpoint: mockEndpoint,
-				model: mockModel,
-				dimensions: mockDimensions,
-			});
+			// Re-import after resetModules to get fresh singleton
+			const mod = await import('../src/rag/embedder');
+			const embedder = mod.initEmbedder(getEmbedderConfig());
 
 			const result = await embedder.embedSingle('Hello world');
 
@@ -85,11 +95,9 @@ describe('Embedder', () => {
 				},
 			});
 
-			const embedder = new Embedder({
-				endpoint: mockEndpoint,
-				model: mockModel,
-				dimensions: mockDimensions,
-			});
+			const mod = await import('../src/rag/embedder');
+			mod.initEmbedder(getEmbedderConfig());
+			const embedder = mod.getEmbedder();
 
 			await expect(embedder.embedSingle('Hello')).rejects.toThrow('Empty embedding response');
 		});
@@ -102,11 +110,8 @@ describe('Embedder', () => {
 				},
 			});
 
-			const embedder = new Embedder({
-				endpoint: mockEndpoint,
-				model: mockModel,
-				dimensions: mockDimensions,
-			});
+			const mod = await import('../src/rag/embedder');
+			const embedder = mod.initEmbedder(getEmbedderConfig());
 
 			await expect(embedder.embedSingle('Hello')).rejects.toThrow('Embedding API error (500)');
 		});
@@ -126,11 +131,8 @@ describe('Embedder', () => {
 				},
 			});
 
-			const embedder = new Embedder({
-				endpoint: mockEndpoint,
-				model: mockModel,
-				dimensions: mockDimensions,
-			});
+			const mod = await import('../src/rag/embedder');
+			const embedder = mod.initEmbedder(getEmbedderConfig());
 
 			const { results, errors } = await embedder.embedMany(['Hello', 'World']);
 
@@ -157,12 +159,8 @@ describe('Embedder', () => {
 					json: { error: { message: 'Server error' } },
 				});
 
-			const embedder = new Embedder({
-				endpoint: mockEndpoint,
-				model: mockModel,
-				dimensions: mockDimensions,
-				batchSize: 1, // process each text separately
-			});
+			const mod = await import('../src/rag/embedder');
+			const embedder = mod.initEmbedder(getEmbedderConfig({ batchSize: 1 }));
 
 			const { results, errors } = await embedder.embedMany(['Text 1', 'Text 2']);
 
@@ -173,7 +171,6 @@ describe('Embedder', () => {
 
 		it('should throw on dimension mismatch', async () => {
 			const wrongDimensions = Array(512).fill(0.01);
-			mockRequestUrl.mockReset();
 			mockRequestUrl.mockResolvedValue({
 				status: 200,
 				json: {
@@ -182,11 +179,8 @@ describe('Embedder', () => {
 				},
 			});
 
-			const embedder = new Embedder({
-				endpoint: mockEndpoint,
-				model: mockModel,
-				dimensions: mockDimensions,
-			});
+			const mod = await import('../src/rag/embedder');
+			const embedder = mod.initEmbedder(getEmbedderConfig());
 
 			await expect(embedder.embedSingle('Hello')).rejects.toThrow('Dimension mismatch: expected 1024, got 512');
 		});
@@ -201,13 +195,8 @@ describe('Embedder', () => {
 				},
 			});
 
-			const embedder = new Embedder({
-				endpoint: mockEndpoint,
-				model: mockModel,
-				dimensions: mockDimensions,
-				batchSize: 1, // batch size of 1
-				requestDelayMs: 50, // 50ms delay
-			});
+			const mod = await import('../src/rag/embedder');
+			const embedder = mod.initEmbedder(getEmbedderConfig({ batchSize: 1, requestDelayMs: 50 }));
 
 			// Embed 3 texts with batch size 1 = 3 requests
 			await embedder.embedMany(['Text 1', 'Text 2', 'Text 3']);
@@ -228,14 +217,8 @@ describe('Embedder', () => {
 				},
 			});
 
-			const embedder = new Embedder(
-				{
-					endpoint: mockEndpoint,
-					model: mockModel,
-					dimensions: mockDimensions,
-					batchSize: 100
-				},
-			);
+			const mod = await import('../src/rag/embedder');
+			const embedder = mod.initEmbedder(getEmbedderConfig({ batchSize: 100 }));
 
 			// Embed 50 texts with batch size 100 = 1 request
 			const texts = Array(50).fill('Test text');

@@ -1,7 +1,7 @@
 import type { TAbstractFile } from "obsidian";
 import { TFile } from "obsidian";
 
-import type { Indexer } from "./indexer";
+import type { getIndexer } from "./indexer";
 
 /** A pending file change operation. */
 interface PendingOperation {
@@ -10,18 +10,47 @@ interface PendingOperation {
   oldPath?: string;
 }
 
+export interface IVault {
+  read: (file: TFile) => Promise<string>;
+  getMarkdownFiles: () => Array<TFile>;
+}
+
+export const { init: initChangeTracker, get: getChangeTracker } =
+  (function (): {
+    init: (
+      this: void,
+      indexer: ReturnType<typeof getIndexer>,
+      vault: IVault,
+    ) => ChangeTracker;
+    get: (this: void) => ChangeTracker;
+  } {
+    let instance: ChangeTracker | null = null;
+
+    return {
+      init: function (
+        this: void,
+        indexer: ReturnType<typeof getIndexer>,
+        vault: IVault,
+      ): ChangeTracker {
+        return (instance ??= new ChangeTracker(indexer, vault));
+      },
+      get: function (this: void): ChangeTracker {
+        if (!instance) {
+          throw new Error("ChangeTracker not initialized. Call init() first.");
+        }
+
+        return instance;
+      },
+    };
+  })();
+
 /**
  * Encapsulates file change tracking, debouncing, and incremental reindexing.
  *
  * Listens to Obsidian vault events, debounces them, and dispatches
  * incremental reindex operations to the indexer.
  */
-export class ChangeTracker {
-  readonly #indexer: Indexer;
-  readonly #vault: {
-    read: (file: TFile) => Promise<string>;
-    getMarkdownFiles: () => Array<TFile>;
-  };
+class ChangeTracker {
   #debounceTimer: ReturnType<typeof setTimeout> | null = null;
   #debouncePending: Array<PendingOperation> = [];
   #onModifyRef: ((file: TAbstractFile) => void) | null = null;
@@ -29,15 +58,9 @@ export class ChangeTracker {
   #onRenameRef: ((file: TAbstractFile, oldPath: string) => void) | null = null;
 
   public constructor(
-    indexer: Indexer,
-    vault: {
-      read: (file: TFile) => Promise<string>;
-      getMarkdownFiles: () => Array<TFile>;
-    },
-  ) {
-    this.#indexer = indexer;
-    this.#vault = vault;
-  }
+    private readonly indexer: ReturnType<typeof getIndexer>,
+    private readonly vault: IVault,
+  ) {}
 
   /**
    * Register file event listeners for incremental reindexing.
@@ -98,7 +121,7 @@ export class ChangeTracker {
    * Cancel any pending debounce operations before starting a full reindex.
    */
   public cancelPending(): void {
-     if (this.#debounceTimer !== null) {
+    if (this.#debounceTimer !== null) {
       clearTimeout(this.#debounceTimer);
       this.#debounceTimer = null;
     }
@@ -135,28 +158,35 @@ export class ChangeTracker {
       try {
         switch (op.type) {
           case "modify": {
-            this.#indexer.enqueueEdit(op.file);
+            this.indexer.enqueueEdit(op.file);
             break;
           }
 
           case "delete": {
-            this.#indexer.enqueueDelete(op.file);
+            this.indexer.enqueueDelete(op.file);
             break;
           }
 
           case "rename": {
             if (op.oldPath === undefined) {
-              console.warn("Yggdrasil: rename event missing old path for", op.file.path);
+              console.warn(
+                "Yggdrasil: rename event missing old path for",
+                op.file.path,
+              );
               continue;
             }
-            const content = await this.#vault.read(op.file);
-            this.#indexer.enqueueRename(op.oldPath, op.file, content);
+            const content = await this.vault.read(op.file);
+            this.indexer.enqueueRename(op.oldPath, op.file, content);
             break;
           }
         }
       } catch (error) {
-        const message = error instanceof Error ? error.message : "Unknown error";
-        console.warn(`Yggdrasil: incremental operation failed for ${op.file.path}:`, message);
+        const message =
+          error instanceof Error ? error.message : "Unknown error";
+        console.warn(
+          `Yggdrasil: incremental operation failed for ${op.file.path}:`,
+          message,
+        );
       }
     }
   }

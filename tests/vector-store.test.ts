@@ -1,7 +1,6 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { FilePersistence } from "../src/rag/vector-store";
-import { VectorStore } from "../src/rag/vector-store";
 
 // In-memory file system mock for tests
 function createMockFileSystem(): FilePersistence {
@@ -39,24 +38,29 @@ function createMockFileSystem(): FilePersistence {
 }
 
 describe("VectorStore", () => {
-  let store: VectorStore;
   let mockFileSystem: FilePersistence;
   const mockDimensions = 10; // Small dimension for fast tests
   const mockEmbedding = Array(10).fill(0.1);
 
   beforeEach(() => {
     mockFileSystem = createMockFileSystem();
-    store = new VectorStore(
-      {
-        dbPath: ":memory:",
-        dimensions: mockDimensions,
-      },
-      mockFileSystem,
-    );
+    // Reset modules between tests so singleton resets
+    vi.resetModules();
   });
+
+  async function getFreshStore(
+    dbPath: string = ":memory:",
+    dimensions: number = mockDimensions,
+  ) {
+    const mod = await import("../src/rag/vector-store");
+    mod.initVectorStoreStore({ dbPath, dimensions }, mockFileSystem);
+    return mod.getVectorStore();
+  }
 
   describe("createNew", () => {
     it("should have correct schema after creation", async () => {
+      const store = await getFreshStore();
+
       // Verify we can add and retrieve chunks
       await store.addChunks([
         {
@@ -75,6 +79,8 @@ describe("VectorStore", () => {
 
   describe("addChunks", () => {
     it("should add chunks to the store", async () => {
+      const store = await getFreshStore();
+
       await store.addChunks([
         {
           id: "test-1",
@@ -99,6 +105,8 @@ describe("VectorStore", () => {
 
   describe("removeChunk", () => {
     it("should remove a single chunk by ID", async () => {
+      const store = await getFreshStore();
+
       await store.addChunks([
         {
           id: "test-1",
@@ -124,6 +132,8 @@ describe("VectorStore", () => {
 
   describe("clear", () => {
     it("should remove all chunks from the store", async () => {
+      const store = await getFreshStore();
+
       await store.addChunks([
         {
           id: "test-1",
@@ -149,6 +159,8 @@ describe("VectorStore", () => {
 
   describe("search", () => {
     it("should find similar chunks by vector similarity", async () => {
+      const store = await getFreshStore();
+
       const embedding1 = Array(10).fill(0.1);
       const embedding2 = Array(10).fill(0.1);
       const embedding3 = Array(10).fill(0.9); // Different
@@ -184,6 +196,8 @@ describe("VectorStore", () => {
     });
 
     it("should respect limit parameter", async () => {
+      const store = await getFreshStore();
+
       for (let i = 0; i < 5; i++) {
         await store.addChunks([
           {
@@ -203,6 +217,8 @@ describe("VectorStore", () => {
 
   describe("countChunks", () => {
     it("should return correct count", async () => {
+      const store = await getFreshStore();
+
       expect(await store.countChunks()).toBe(0);
 
       await store.addChunks([
@@ -221,6 +237,8 @@ describe("VectorStore", () => {
 
   describe("saveToDisk and loadFromDisk", () => {
     it("should persist and restore data via disk", async () => {
+      const store = await getFreshStore();
+
       await store.addChunks([
         {
           id: "test-1",
@@ -235,13 +253,7 @@ describe("VectorStore", () => {
       await store.saveToDisk();
 
       // Create new store and load from disk
-      const newStore = new VectorStore(
-        {
-          dbPath: ":memory:",
-          dimensions: mockDimensions,
-        },
-        mockFileSystem,
-      );
+      const newStore = await getFreshStore();
 
       await newStore.loadFromDisk();
 
@@ -250,6 +262,9 @@ describe("VectorStore", () => {
     });
 
     it("should throw on loadFromDisk if file does not exist", async () => {
+      // Create a fresh store that hasn't saved to disk yet
+      const store = await getFreshStore("/nonexistent/path.json");
+
       await expect(store.loadFromDisk()).rejects.toThrow(
         "Failed to load vector store",
       );

@@ -10,10 +10,9 @@
 import type { TFile } from "obsidian";
 
 import { chunkText } from "./chunker";
-import type { Embedder } from "./embedder";
-import type { FilePersistence } from "./vector-store";
+import type { getEmbedder } from "./embedder";
 import type { StoredChunk } from "./vector-store";
-import { VectorStore } from "./vector-store";
+import type { getVectorStore } from "./vector-store";
 
 /** Progress callback for reporting indexing status. */
 export interface IndexProgress {
@@ -61,7 +60,7 @@ export interface IndexResult {
 }
 
 /** Vault interface for file operations (Obsidian dependency). */
-export interface VaultAdapter {
+export interface IVaultAdapter {
   /** Get all markdown files in the vault. */
   getMarkdownFiles: () => Array<TFile>;
   /** Read the content of a file. */
@@ -80,6 +79,36 @@ interface QueueItem {
   oldPath?: string;
 }
 
+export const { init: initIndexer, get: getIndexer } = (function (): {
+  init: (
+    this: void,
+    vault: IVaultAdapter,
+    embedder: ReturnType<typeof getEmbedder>,
+    vectorStore: ReturnType<typeof getVectorStore>,
+  ) => Indexer;
+  get: (this: void) => Indexer;
+} {
+  let instance: Indexer | null = null;
+
+  return {
+    init: function (
+      this: void,
+      vault: IVaultAdapter,
+      embedder: ReturnType<typeof getEmbedder>,
+      vectorStore: ReturnType<typeof getVectorStore>,
+    ): Indexer {
+      return (instance ??= new Indexer(vault, embedder, vectorStore));
+    },
+    get: function (this: void): Indexer {
+      if (!instance) {
+        throw new Error("Indexer not initialized. Call init() first.");
+      }
+
+      return instance;
+    },
+  };
+})();
+
 /**
  * RAG indexer that orchestrates the full indexing pipeline.
  *
@@ -87,48 +116,16 @@ interface QueueItem {
  * incremental file operations enqueue work items that are processed
  * sequentially by a single async processor loop.
  */
-export class Indexer {
-  readonly #config: IndexerConfig;
-  readonly #embedder: Embedder;
-  readonly #vault: VaultAdapter;
-  readonly #fileSystem: FilePersistence;
-  readonly #store: VectorStore;
-
+class Indexer {
   // Queue management
   #queue: Array<QueueItem> = [];
   #processing = false;
 
-  public get vectorStore(): VectorStore {
-    return this.#store;
-  }
-
   public constructor(
-    config: IndexerConfig,
-    vault: VaultAdapter,
-    embedder: Embedder,
-    fileSystem: FilePersistence,
-  ) {
-    this.#config = config;
-    this.#vault = vault;
-    this.#embedder = embedder;
-    this.#fileSystem = fileSystem;
-
-    const store = new VectorStore(
-      {
-        dbPath: this.#config.dbPath,
-        dimensions: this.#config.dimensions,
-      },
-      this.#fileSystem,
-    );
-    this.#store = store;
-  }
-
-  /**
-   * Initialize the vector store by loading from disk, or creating a new one.
-   */
-  public async initialize(): Promise<void> {
-    await this.#store.initialize();
-  }
+    private readonly vault: IVaultAdapter,
+    private readonly embedder: ReturnType<typeof getEmbedder>,
+    private readonly vectorStore: ReturnType<typeof getVectorStore>,
+  ) {}
 
   /**
    * Enqueue a single file for incremental reindexing.
@@ -242,7 +239,7 @@ export class Indexer {
             break;
           }
         }
-        this.#store?.saveToDisk();
+        await this.vectorStore.saveToDisk();
       } catch (error) {
         console.error(
           `Error processing ${item.operation} for ${item.file.path}:`,
@@ -258,7 +255,7 @@ export class Indexer {
     // Read content from vault if not pre-provided (full reindex path)
     if (content === undefined) {
       try {
-        content = await this.#vault.read(file);
+        content = await this.vault.read(file);
       } catch {
         console.error(`Failed to read file content for ${file.path}`);
         return;
@@ -279,7 +276,7 @@ export class Indexer {
     // Embed the chunks
     const chunkTexts = chunks.map((c) => c.text);
     const { results: embeddings, errors: embedErrors } =
-      await this.#embedder.embedMany(chunkTexts);
+      await this.embedder.embedMany(chunkTexts);
 
     if (embedErrors.length > 0) {
       for (const err of embedErrors) {
@@ -300,13 +297,13 @@ export class Indexer {
         chunkIndex: chunks[idx].chunkIndex,
       }));
 
-      await this.#store.removeBySource(file.path);
-      await this.#store.addChunks(storedChunks);
+      await this.vectorStore.removeBySource(file.path);
+      await this.vectorStore.addChunks(storedChunks);
     }
   }
 
   async #processFileDelete(filePath: string): Promise<void> {
-    await this.#store.removeBySource(filePath);
+    await this.vectorStore.removeBySource(filePath);
   }
 
   async #processFileRename(
@@ -314,7 +311,7 @@ export class Indexer {
     newFile: TFile,
     newContent: string,
   ): Promise<void> {
-    const vectorStore = this.#store;
+    const vectorStore = this.vectorStore;
     if (vectorStore === null) {
       throw new Error("Indexer not initialized. Call initialize() first.");
     }

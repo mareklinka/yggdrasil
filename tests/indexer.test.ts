@@ -1,13 +1,15 @@
 import type { TFile } from "obsidian";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { Embedder, EmbeddingResult } from "../src/rag/embedder";
-import {
-  Indexer,
-  type IndexerConfig,
-  type VaultAdapter,
-} from "../src/rag/indexer";
-import type { FilePersistence, StoredChunk } from "../src/rag/vector-store";
+import type {
+  EmbeddingError,
+  EmbeddingResult,
+  getEmbedder,
+} from "../src/rag/embedder";
+import { type getIndexer, type IVaultAdapter } from "../src/rag/indexer";
+// Note: initIndexer is idempotent and automatically resets the singleton,
+// so no separate reset function is needed in tests.
+import type { getVectorStore, StoredChunk } from "../src/rag/vector-store";
 
 // Helper: create a MockTFile cast to TFile for enqueue calls
 function mkFile(path: string): TFile {
@@ -32,42 +34,46 @@ class MockTFile {
 }
 
 // Use vi.hoisted() to define mocks before vi.mock() hoisting
-const mocks = vi.hoisted(() => ({
-  mockVectorStore: {
-    createNew: vi.fn(),
-    addChunks: vi.fn(),
-    saveToDisk: vi.fn(),
-    close: vi.fn(),
-    clear: vi.fn(),
-    initialize: vi.fn(function (this: { createNew: () => Promise<void> }) {
-      return this.createNew();
-    }),
-    removeBySource: vi.fn().mockResolvedValue(0),
-  },
-  VectorStore: vi.fn(),
-}));
+const mocks = vi.hoisted(() => {
+  const addChunksMock = vi.fn();
+  const saveToDiskMock = vi.fn();
+  const clearMock = vi.fn();
+  const removeBySourceMock = vi.fn().mockResolvedValue(0);
+  const countChunksMock = vi.fn().mockResolvedValue(0);
+  const searchMock = vi.fn().mockResolvedValue([]);
+  const oramaMock = vi.fn();
+  const loadFromDiskMock = vi.fn();
 
-// Mock the vector-store module using the hoisted mocks
-vi.mock("../src/rag/vector-store", () => ({
-  VectorStore: mocks.VectorStore,
-}));
-
-// In-memory file system mock for tests
-function createMockFileSystem(): FilePersistence {
   return {
-    write: vi.fn().mockResolvedValue(undefined),
-    read: vi.fn().mockResolvedValue("{}"),
-    writeBinary: vi.fn().mockResolvedValue(undefined),
-    readBinary: vi.fn().mockResolvedValue(new ArrayBuffer(0)),
-    exists: vi.fn().mockResolvedValue(false),
+    mockVectorStore: {
+      addChunks: addChunksMock,
+      saveToDisk: saveToDiskMock,
+      clear: clearMock,
+      removeBySource: removeBySourceMock,
+      countChunks: countChunksMock,
+      search: searchMock,
+      orama: oramaMock,
+      loadFromDisk: loadFromDiskMock,
+    } as unknown as ReturnType<typeof getVectorStore>,
+    addChunksMock,
+    removeBySourceMock,
   };
-}
+});
+
+// Outer-scope mock references for use in tests
+let getMarkdownFilesMock: ReturnType<typeof vi.fn>;
+let readMock: ReturnType<typeof vi.fn>;
+let embedManyMock: ReturnType<typeof vi.fn>;
+let embedSingleMock: ReturnType<typeof vi.fn>;
+let getConfigMock: ReturnType<typeof vi.fn>;
 
 /**
  * Wait for the indexer's queue processor to finish all pending work.
  * Polls isProcessing() and queue length until idle.
  */
-async function waitForProcessing(indexer: Indexer): Promise<void> {
+async function waitForProcessing(
+  indexer: ReturnType<typeof getIndexer>,
+): Promise<void> {
   for (let i = 0; i < 100; i++) {
     if (!indexer.isProcessing() && indexer.getQueueLength() === 0) {
       // Give a tiny tick for any final microtasks
@@ -80,32 +86,28 @@ async function waitForProcessing(indexer: Indexer): Promise<void> {
 }
 
 describe("Indexer", () => {
-  let indexer: Indexer;
-  let mockEmbedder: { embedMany: ReturnType<typeof vi.fn> };
-  let mockFileSystem: FilePersistence;
-
-  const mockConfig: IndexerConfig = {
-    dbPath: "/test/vectors.json",
-    dimensions: 1024,
-  };
-
-  const mockVault = {
-    getMarkdownFiles: vi.fn().mockReturnValue([] as Array<MockTFile>),
-    read: vi.fn<(...args: Array<[TFile]>) => Promise<string>>().mockResolvedValue(""),
-  };
+  let indexer: ReturnType<typeof getIndexer>;
+  let mockEmbedder: ReturnType<typeof getEmbedder>;
+  let mockVault: IVaultAdapter;
 
   beforeEach(async () => {
     vi.clearAllMocks();
-    mockFileSystem = createMockFileSystem();
+    vi.resetModules();
 
-    // Set up VectorStore mock to return our shared mock instance
-    // Must use a regular function (not arrow) because `new` requires a constructable function
-    mocks.VectorStore.mockImplementation(function () {
-      return mocks.mockVectorStore;
-    });
+    const { initIndexer, getIndexer } = await import("../src/rag/indexer");
 
-    mockEmbedder = {
-      embedMany: vi.fn().mockImplementation(async (texts: Array<string>) => ({
+    // initIndexer is idempotent and automatically resets the singleton
+    getMarkdownFilesMock = vi.fn().mockReturnValue([] as Array<MockTFile>);
+    readMock = vi.fn().mockResolvedValue("");
+
+    mockVault = {
+      getMarkdownFiles: getMarkdownFilesMock,
+      read: readMock,
+    } as unknown as IVaultAdapter;
+
+    embedManyMock = vi
+      .fn()
+      .mockImplementation(async (texts: Array<string>) => ({
         results: texts.map(
           (text) =>
             ({
@@ -113,20 +115,24 @@ describe("Indexer", () => {
               text,
             }) satisfies EmbeddingResult,
         ),
-        errors: [] as Array<{ text: string; message: string }>,
-      })),
-    };
+        errors: [] as Array<EmbeddingError>,
+      }));
+    embedSingleMock = vi.fn().mockResolvedValue(Array(1024).fill(0.01));
+    getConfigMock = vi.fn().mockReturnValue({
+      endpoint: "http://localhost:8000",
+      model: "text-embedding-3-small",
+      dimensions: 1024,
+    });
 
-    // Pass mock embedder and mock file system via dependency injection
-    indexer = new Indexer(
-      mockConfig,
-      mockVault as unknown as VaultAdapter,
-      mockEmbedder as unknown as Embedder,
-      mockFileSystem,
-    );
+    mockEmbedder = {
+      embedMany: embedManyMock,
+      embedSingle: embedSingleMock,
+      getConfig: getConfigMock,
+    } as unknown as ReturnType<typeof getEmbedder>;
 
-    // Initialize the indexer so it has an initialized store
-    await indexer.initialize();
+    // Initialize the singleton indexer with mock dependencies
+    initIndexer(mockVault, mockEmbedder, mocks.mockVectorStore);
+    indexer = getIndexer();
   });
 
   afterEach(() => {
@@ -135,12 +141,9 @@ describe("Indexer", () => {
 
   describe("enqueueEdit (full reindex)", () => {
     it("should enqueue files, process them, and store embeddings", async () => {
-      const mockFiles = [
-        new MockTFile("note1.md"),
-        new MockTFile("note2.md"),
-      ];
-      mockVault.getMarkdownFiles.mockReturnValue(mockFiles);
-      mockVault.read.mockResolvedValue("Hello world. This is a test note.");
+      const mockFiles = [new MockTFile("note1.md"), new MockTFile("note2.md")];
+      getMarkdownFilesMock.mockReturnValue(mockFiles);
+      readMock.mockResolvedValue("Hello world. This is a test note.");
 
       // Enqueue each file for reindexing
       for (const file of mockFiles) {
@@ -151,71 +154,71 @@ describe("Indexer", () => {
       await waitForProcessing(indexer);
 
       // Both files were read and embedded
-      expect(mockVault.read).toHaveBeenCalledTimes(2);
-      expect(mockEmbedder.embedMany).toHaveBeenCalledTimes(2);
+      expect(readMock).toHaveBeenCalledTimes(2);
+      expect(embedManyMock).toHaveBeenCalledTimes(2);
 
       // Verify vector store operations
-      expect(mocks.mockVectorStore.createNew).toHaveBeenCalledTimes(1);
-      expect(mocks.mockVectorStore.addChunks).toHaveBeenCalledTimes(2);
+      expect(mocks.addChunksMock).toHaveBeenCalledTimes(2);
     });
 
     it("should handle empty vault (no files to enqueue)", async () => {
-      mockVault.getMarkdownFiles.mockReturnValue([]);
+      getMarkdownFilesMock.mockReturnValue([]);
 
       // No enqueue calls — nothing to process
       await waitForProcessing(indexer);
 
-      expect(mocks.mockVectorStore.createNew).toHaveBeenCalledTimes(1);
-      expect(mocks.mockVectorStore.addChunks).not.toHaveBeenCalled();
+      expect(mocks.addChunksMock).not.toHaveBeenCalled();
     });
 
     it("should skip empty files", async () => {
-      mockVault.getMarkdownFiles.mockReturnValue([mkFile("empty.md")]);
-      mockVault.read.mockResolvedValue("");
+      getMarkdownFilesMock.mockReturnValue([mkFile("empty.md")]);
+      readMock.mockResolvedValue("");
 
       indexer.enqueueEdit(mkFile("empty.md"));
       await waitForProcessing(indexer);
 
       // File was read but content is empty, so no chunking/embedding
-      expect(mockVault.read).toHaveBeenCalledTimes(1);
-      expect(mockEmbedder.embedMany).not.toHaveBeenCalled();
+      expect(readMock).toHaveBeenCalledTimes(1);
+      expect(embedManyMock).not.toHaveBeenCalled();
     });
 
     it("should skip whitespace-only files", async () => {
-      mockVault.getMarkdownFiles.mockReturnValue([mkFile("whitespace.md")]);
-      mockVault.read.mockResolvedValue("   \n\n  ");
+      getMarkdownFilesMock.mockReturnValue([mkFile("whitespace.md")]);
+      readMock.mockResolvedValue("   \n\n  ");
 
       indexer.enqueueEdit(mkFile("whitespace.md"));
       await waitForProcessing(indexer);
 
       // File was read but content is whitespace-only, so no chunking/embedding
-      expect(mockVault.read).toHaveBeenCalledTimes(1);
-      expect(mockEmbedder.embedMany).not.toHaveBeenCalled();
+      expect(readMock).toHaveBeenCalledTimes(1);
+      expect(embedManyMock).not.toHaveBeenCalled();
     });
 
     it("should handle file read errors gracefully", async () => {
-      mockVault.getMarkdownFiles.mockReturnValue([
+      getMarkdownFilesMock.mockReturnValue([
         mkFile("readable.md"),
         mkFile("unreadable.md"),
       ]);
-      mockVault.read
-        .mockResolvedValueOnce("Readable content")
-        .mockRejectedValueOnce(new Error("File not found"));
+      readMock
+        .mockImplementationOnce(() => Promise.resolve("Readable content"))
+        .mockImplementationOnce(() =>
+          Promise.reject(new Error("File not found")),
+        );
 
       indexer.enqueueEdit(mkFile("readable.md"));
       indexer.enqueueEdit(mkFile("unreadable.md"));
       await waitForProcessing(indexer);
 
       // Readable file was processed, unreadable was skipped
-      expect(mockVault.read).toHaveBeenCalledTimes(2);
-      expect(mockEmbedder.embedMany).toHaveBeenCalledTimes(1);
+      expect(readMock).toHaveBeenCalledTimes(2);
+      expect(embedManyMock).toHaveBeenCalledTimes(1);
     });
 
     it("should handle embedding failures gracefully", async () => {
-      mockVault.getMarkdownFiles.mockReturnValue([mkFile("note.md")]);
-      mockVault.read.mockResolvedValue("Test content");
+      getMarkdownFilesMock.mockReturnValue([mkFile("note.md")]);
+      readMock.mockResolvedValue("Test content");
 
-      mockEmbedder.embedMany.mockResolvedValue({
+      embedManyMock.mockResolvedValue({
         results: [] as Array<EmbeddingResult>,
         errors: [{ text: "Test content", message: "API error" }],
       });
@@ -223,22 +226,23 @@ describe("Indexer", () => {
       indexer.enqueueEdit(mkFile("note.md"));
       await waitForProcessing(indexer);
 
-      // File was read and embedding was attempted; indexer continues
-      expect(mockVault.read).toHaveBeenCalledTimes(1);
-      expect(mockEmbedder.embedMany).toHaveBeenCalledTimes(1);
+      // File was read and embedding was attempted; indexer continues despite failure
+      expect(readMock).toHaveBeenCalledTimes(1);
+      expect(embedManyMock).toHaveBeenCalledTimes(1);
     });
 
     it("should store chunks with correct metadata", async () => {
-      mockVault.getMarkdownFiles.mockReturnValue([mkFile("campaigns/npc.md")]);
-      mockVault.read.mockResolvedValue("Grommet is a dwarf warrior.");
+      getMarkdownFilesMock.mockReturnValue([mkFile("campaigns/npc.md")]);
+      readMock.mockResolvedValue("Grommet is a dwarf warrior.");
 
       indexer.enqueueEdit(mkFile("campaigns/npc.md"));
       await waitForProcessing(indexer);
 
       // Check that addChunks was called with correct metadata
-      expect(mocks.mockVectorStore.addChunks).toHaveBeenCalled();
-      const storedChunks: Array<StoredChunk> =
-        mocks.mockVectorStore.addChunks.mock.calls[0][0];
+      expect(mocks.addChunksMock).toHaveBeenCalled();
+      const storedChunks: Array<StoredChunk> = (
+        mocks.addChunksMock as ReturnType<typeof vi.fn>
+      ).mock.calls[0][0];
 
       expect(storedChunks.length).toBeGreaterThan(0);
       expect(storedChunks[0].source).toBe("campaigns/npc.md");
@@ -246,18 +250,19 @@ describe("Indexer", () => {
     });
 
     it("should include file path in chunk IDs", async () => {
-      mockVault.getMarkdownFiles.mockReturnValue([mkFile("folder/note.md")]);
+      getMarkdownFilesMock.mockReturnValue([mkFile("folder/note.md")]);
       const longContent =
         "Test content with enough words to produce multiple chunks " +
         "for testing the chunking logic that splits text into smaller pieces.";
-      mockVault.read.mockResolvedValue(longContent);
+      readMock.mockResolvedValue(longContent);
 
       indexer.enqueueEdit(mkFile("folder/note.md"));
       await waitForProcessing(indexer);
 
-      expect(mocks.mockVectorStore.addChunks).toHaveBeenCalled();
-      const storedChunks: Array<StoredChunk> =
-        mocks.mockVectorStore.addChunks.mock.calls[0][0];
+      expect(mocks.addChunksMock).toHaveBeenCalled();
+      const storedChunks: Array<StoredChunk> = (
+        mocks.addChunksMock as ReturnType<typeof vi.fn>
+      ).mock.calls[0][0];
 
       // Chunk IDs should include the file path
       for (const chunk of storedChunks) {
@@ -272,9 +277,7 @@ describe("Indexer", () => {
       indexer.enqueueDelete(mkFile("campaigns/npc.md"));
       await waitForProcessing(indexer);
 
-      expect(mocks.mockVectorStore.removeBySource).toHaveBeenCalledWith(
-        "campaigns/npc.md",
-      );
+      expect(mocks.removeBySourceMock).toHaveBeenCalledWith("campaigns/npc.md");
     });
   });
 
@@ -290,20 +293,19 @@ describe("Indexer", () => {
       await waitForProcessing(indexer);
 
       // Should remove old chunks
-      expect(mocks.mockVectorStore.removeBySource).toHaveBeenCalledWith(
-        "old/npc.md",
-      );
+      expect(mocks.removeBySourceMock).toHaveBeenCalledWith("old/npc.md");
       // Should re-index at new path
-      expect(mocks.mockVectorStore.addChunks).toHaveBeenCalled();
-      const storedChunks: Array<StoredChunk> =
-        mocks.mockVectorStore.addChunks.mock.calls[0][0];
+      expect(mocks.addChunksMock).toHaveBeenCalled();
+      const storedChunks: Array<StoredChunk> = (
+        mocks.addChunksMock as ReturnType<typeof vi.fn>
+      ).mock.calls[0][0];
       expect(storedChunks[0].source).toBe("new/npc.md");
     });
   });
 
   describe("cancelPending", () => {
     it("should clear the queue and reset processing state", async () => {
-      mockVault.read.mockResolvedValue("content");
+      readMock.mockResolvedValue("content");
 
       indexer.enqueueEdit(mkFile("note1.md"));
       indexer.enqueueEdit(mkFile("note2.md"));
@@ -320,7 +322,7 @@ describe("Indexer", () => {
 
     it("should stop processing if cancelled mid-flight", async () => {
       // Set up a slow read so processing takes time
-      mockVault.read.mockImplementation(
+      readMock.mockImplementation(
         () => new Promise((r) => setTimeout(() => r("content"), 100)),
       );
 
@@ -367,7 +369,7 @@ describe("Indexer", () => {
     });
 
     it("should process items sequentially", async () => {
-      mockVault.read.mockResolvedValue("Test content");
+      readMock.mockResolvedValue("Test content");
 
       indexer.enqueueEdit(mkFile("note1.md"));
       indexer.enqueueEdit(mkFile("note2.md"));
@@ -375,33 +377,68 @@ describe("Indexer", () => {
       await waitForProcessing(indexer);
 
       // Both files should be read (2 calls for 2 files)
-      expect(mockVault.read).toHaveBeenCalledTimes(2);
+      expect(readMock).toHaveBeenCalledTimes(2);
     });
   });
 
   describe("initialization", () => {
-    it("should create vector store with correct config", async () => {
-      expect(mocks.VectorStore).toHaveBeenCalledWith(
-        { dbPath: "/test/vectors.json", dimensions: 1024 },
-        mockFileSystem,
+    it("should initialize and retrieve the singleton indexer", async () => {
+      const testVault: IVaultAdapter = {
+        getMarkdownFiles: vi.fn().mockReturnValue([] as Array<MockTFile>),
+        read: vi.fn().mockResolvedValue(""),
+      };
+
+      const testEmbedder = {
+        embedMany: vi.fn().mockResolvedValue({
+          results: [] as Array<EmbeddingResult>,
+          errors: [],
+        }),
+        embedSingle: vi.fn().mockResolvedValue([]),
+        getConfig: vi.fn(),
+      } as unknown as ReturnType<typeof getEmbedder>;
+
+      vi.resetModules();
+      const { initIndexer, getIndexer } = await import("../src/rag/indexer");
+
+      const testIndexer = initIndexer(
+        testVault,
+        testEmbedder,
+        mocks.mockVectorStore,
       );
+      const retrievedIndexer = getIndexer();
+
+      expect(testIndexer).toBe(retrievedIndexer);
+      expect(retrievedIndexer).toBeDefined();
     });
   });
 
   describe("constructor", () => {
-    it("should create indexer with custom config", () => {
-      const customConfig: IndexerConfig = {
-        dbPath: "/custom/path.json",
-        dimensions: 512,
+    it("should create indexer with custom config", async () => {
+      const testVault: IVaultAdapter = {
+        getMarkdownFiles: vi.fn().mockReturnValue([] as Array<MockTFile>),
+        read: vi.fn().mockResolvedValue(""),
       };
 
-      const customIndexer = new Indexer(
-        customConfig,
-        mockVault as unknown as VaultAdapter,
-        mockEmbedder as unknown as Embedder,
-        mockFileSystem,
+      const testEmbedder = {
+        embedMany: vi.fn().mockResolvedValue({
+          results: [] as Array<EmbeddingResult>,
+          errors: [],
+        }),
+        embedSingle: vi.fn().mockResolvedValue([]),
+        getConfig: vi.fn(),
+      } as unknown as ReturnType<typeof getEmbedder>;
+
+      vi.resetModules();
+      const { initIndexer } = await import("../src/rag/indexer");
+
+      const customIndexer = initIndexer(
+        testVault,
+        testEmbedder,
+        mocks.mockVectorStore,
       );
       expect(customIndexer).toBeDefined();
+      expect(customIndexer.getQueueLength()).toBe(0);
+      expect(customIndexer.isProcessing()).toBe(false);
     });
   });
 });

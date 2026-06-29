@@ -2,11 +2,34 @@ import type { Vault } from "obsidian";
 
 import { type FilePersistence } from "./vector-store";
 
+export const { init: initVaultFileSystem, get: getVaultFileSystem } =
+  (function (): {
+    init: (this: void, vault: Vault) => VaultFileSystem;
+    get: (this: void) => VaultFileSystem;
+  } {
+    let instance: VaultFileSystem | null = null;
+
+    return {
+      init: function (this: void, vault: Vault): VaultFileSystem {
+        return (instance ??= new VaultFileSystem(vault));
+      },
+      get: function (this: void): VaultFileSystem {
+        if (!instance) {
+          throw new Error(
+            "VaultFileSystem not initialized. Call init() first.",
+          );
+        }
+
+        return instance;
+      },
+    };
+  })();
+
 /**
  * File persistence adapter backed by an Obsidian Vault.
  * Creates parent directories automatically when writing files.
  */
-export class VaultFileSystem implements FilePersistence {
+class VaultFileSystem implements FilePersistence {
   public constructor(private readonly vault: Vault) {}
 
   public async write(filePath: string, content: string): Promise<void> {
@@ -14,7 +37,10 @@ export class VaultFileSystem implements FilePersistence {
     await this.vault.adapter.write(filePath, content);
   }
 
-  public async writeBinary(filePath: string, content: ArrayBuffer): Promise<void> {
+  public async writeBinary(
+    filePath: string,
+    content: ArrayBuffer,
+  ): Promise<void> {
     await this.#ensureParentDir(filePath);
     await this.vault.adapter.writeBinary(filePath, content);
   }
