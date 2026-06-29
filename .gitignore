@@ -25,4 +25,4 @@ coverage/
 # Environment
 .env
 .env.local
-test-vault/.obsidian/plugins/yggdrasil/vectors.json
+test-vault/.obsidian/plugins/yggdrasil/vector_store.data

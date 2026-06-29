@@ -1,13 +1,18 @@
 import type { WorkspaceLeaf } from "obsidian";
-import { ItemView } from "obsidian";
+import { ItemView, MarkdownRenderer } from "obsidian";
+
+import type { LangchainRag } from "../rag/langchain-rag";
 
 export const CHAT_VIEW_TYPE = "yggdrasil-chat";
-export const CANNED_RESPONSE = "This functionality is under development";
 
 export class ChatView extends ItemView {
   #messageListEl: HTMLElement | null = null;
+  #loadingWrapperEl: HTMLElement | null = null;
 
-  public constructor(leaf: WorkspaceLeaf) {
+  public constructor(
+    leaf: WorkspaceLeaf,
+    private readonly rag: LangchainRag,
+  ) {
     super(leaf);
   }
 
@@ -28,11 +33,15 @@ export class ChatView extends ItemView {
     contentEl.addClass("yggdrasil-chat-view");
 
     // Chat message list area
-    const listEl: HTMLElement = contentEl.createDiv({ cls: "yggdrasil-chat-messages" });
+    const listEl: HTMLElement = contentEl.createDiv({
+      cls: "yggdrasil-chat-messages",
+    });
     this.#messageListEl = listEl;
 
     // Input row at bottom
-    const inputRow: HTMLElement = contentEl.createDiv({ cls: "yggdrasil-chat-input-row" });
+    const inputRow: HTMLElement = contentEl.createDiv({
+      cls: "yggdrasil-chat-input-row",
+    });
 
     const input: HTMLInputElement = inputRow.createEl("input", {
       type: "text",
@@ -64,13 +73,19 @@ export class ChatView extends ItemView {
 
   public async onClose(): Promise<void> {
     this.#messageListEl = null;
+    this.#loadingWrapperEl = null;
   }
 
-  #onSend(inputEl: HTMLInputElement): void {
+  readonly #messages: Array<{ content: string; role: "user" | "assistant" }> =
+    [];
+
+  async #onSend(inputEl: HTMLInputElement): Promise<void> {
     const text: string = inputEl.value.trim();
     if (text.length === 0) {
       return;
     }
+
+    this.#messages.push({ content: text, role: "user" });
 
     // Disable input while rendering canned response
     inputEl.disabled = true;
@@ -81,14 +96,61 @@ export class ChatView extends ItemView {
       // Clear input
       inputEl.value = "";
 
-      // Append assistant bubble (canned response)
-      this.#renderMessage(CANNED_RESPONSE, "assistant");
-      // #renderMessage already scrolls to bottom
+      // Show loading indicator
+      this.#showLoading();
+
+      try {
+        const response = await this.rag.query(this.#messages);
+        this.#messages.push({ content: response, role: "assistant" });
+        this.#renderMessage(response, "assistant");
+      } finally {
+        // Remove loading indicator regardless of outcome
+        this.#hideLoading();
+      }
     } finally {
       // Re-enable input regardless of outcome
       inputEl.disabled = false;
       // Retain focus for quick follow-up messages
       inputEl.focus();
+    }
+  }
+
+  #showLoading(): void {
+    if (this.#messageListEl === null) {
+      return;
+    }
+
+    this.#hideLoading(); // Safety: remove any existing indicator
+
+    const wrapper: HTMLElement = this.#messageListEl.createDiv({
+      cls: "yggdrasil-chat-row yggdrasil-chat-row--assistant",
+    });
+
+    const bubble: HTMLElement = wrapper.createDiv({
+      cls: "yggdrasil-chat-bubble yggdrasil-chat-bubble--assistant yggdrasil-chat-loading",
+    });
+
+    const content: HTMLElement = bubble.createEl("span", {
+      cls: "yggdrasil-chat-loading-content",
+    });
+
+    content.createEl("span", {
+      cls: "yggdrasil-chat-spinner",
+    });
+
+    content.createEl("span", {
+      cls: "yggdrasil-chat-loading-dots",
+      text: "Thinking",
+    });
+
+    this.#loadingWrapperEl = wrapper;
+    this.#scrollToBottom();
+  }
+
+  #hideLoading(): void {
+    if (this.#loadingWrapperEl !== null) {
+      this.#loadingWrapperEl.remove();
+      this.#loadingWrapperEl = null;
     }
   }
 
@@ -130,21 +192,28 @@ export class ChatView extends ItemView {
         return;
       }
 
-      clipboard.writeText(text).then(() => {
-        // Brief visual feedback
-        copyBtn.textContent = "\u2713"; // ✓ checkmark
-        setTimeout(() => {
-          copyBtn.textContent = "\u2398";
-        }, 1000);
-      }).catch((): void => {
-        // Clipboard write failed silently — non-critical UX feature
-      });
+      clipboard
+        .writeText(text)
+        .then(() => {
+          // Brief visual feedback
+          copyBtn.textContent = "\u2713"; // ✓ checkmark
+          setTimeout(() => {
+            copyBtn.textContent = "\u2398";
+          }, 1000);
+        })
+        .catch((): void => {
+          // Clipboard write failed silently — non-critical UX feature
+        });
     });
 
-    bubble.createEl("div", {
-      cls: "yggdrasil-chat-bubble-content",
-      text,
-    });
+    if (sender === "assistant") {
+      MarkdownRenderer.render(this.app, text, bubble, "", this);
+    } else {
+      bubble.createEl("div", {
+        cls: "yggdrasil-chat-bubble-content",
+        text,
+      });
+    }
 
     this.#scrollToBottom();
   }

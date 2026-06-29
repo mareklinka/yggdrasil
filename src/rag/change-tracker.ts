@@ -1,7 +1,7 @@
-import type { TAbstractFile } from "obsidian";
+import type { EventRef, TAbstractFile, Vault } from "obsidian";
 import { TFile } from "obsidian";
 
-import type { getIndexer } from "./indexer";
+import type { LangchainRag } from "./langchain-rag";
 
 /** A pending file change operation. */
 interface PendingOperation {
@@ -15,118 +15,44 @@ export interface IVault {
   getMarkdownFiles: () => Array<TFile>;
 }
 
-export const { init: initChangeTracker, get: getChangeTracker } =
-  (function (): {
-    init: (
-      this: void,
-      indexer: ReturnType<typeof getIndexer>,
-      vault: IVault,
-    ) => ChangeTracker;
-    get: (this: void) => ChangeTracker;
-  } {
-    let instance: ChangeTracker | null = null;
+export class ChangeTracker {
+  readonly #onModifyRef: EventRef;
+  readonly #onDeleteRef: EventRef;
+  readonly #onRenameRef: EventRef;
 
-    return {
-      init: function (
-        this: void,
-        indexer: ReturnType<typeof getIndexer>,
-        vault: IVault,
-      ): ChangeTracker {
-        return (instance ??= new ChangeTracker(indexer, vault));
-      },
-      get: function (this: void): ChangeTracker {
-        if (!instance) {
-          throw new Error("ChangeTracker not initialized. Call init() first.");
-        }
-
-        return instance;
-      },
-    };
-  })();
-
-/**
- * Encapsulates file change tracking, debouncing, and incremental reindexing.
- *
- * Listens to Obsidian vault events, debounces them, and dispatches
- * incremental reindex operations to the indexer.
- */
-class ChangeTracker {
   #debounceTimer: ReturnType<typeof setTimeout> | null = null;
   #debouncePending: Array<PendingOperation> = [];
-  #onModifyRef: ((file: TAbstractFile) => void) | null = null;
-  #onDeleteRef: ((file: TAbstractFile) => void) | null = null;
-  #onRenameRef: ((file: TAbstractFile, oldPath: string) => void) | null = null;
 
   public constructor(
-    private readonly indexer: ReturnType<typeof getIndexer>,
-    private readonly vault: IVault,
-  ) {}
-
-  /**
-   * Register file event listeners for incremental reindexing.
-   * Must be called after the indexer is fully initialized.
-   */
-  public registerEventListeners(appVault: unknown): void {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const vault = appVault as any;
-    const onModify = (file: TAbstractFile): void => {
+    private readonly vault: Vault,
+    private readonly rag: LangchainRag,
+  ) {
+    this.#onModifyRef = this.vault.on('modify', (file: TAbstractFile): void => {
       if (file instanceof TFile) {
         this.#enqueueFileEvent("modify", file);
       }
-    };
-    const onDelete = (file: TAbstractFile): void => {
+    });
+    this.#onDeleteRef = this.vault.on('delete', (file: TAbstractFile): void => {
       if (file instanceof TFile) {
         this.#enqueueFileEvent("delete", file);
       }
-    };
-    const onRename = (file: TAbstractFile, oldPath: string): void => {
+    });
+    this.#onRenameRef = this.vault.on('rename', (file: TAbstractFile, oldPath: string): void => {
       if (file instanceof TFile) {
         this.#enqueueFileEvent("rename", file, oldPath);
       }
-    };
-
-    this.#onModifyRef = onModify;
-    this.#onDeleteRef = onDelete;
-    this.#onRenameRef = onRename;
-
-    vault.on("modify", onModify);
-    vault.on("delete", onDelete);
-    vault.on("rename", onRename);
+    });
   }
 
-  /**
-   * Remove all registered event listeners and clear the debounce timer.
-   */
-  public unregisterEventListeners(appVault: unknown): void {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const vault = appVault as any;
-
+  public unregisterEventListeners(): void {
     if (this.#debounceTimer !== null) {
       clearTimeout(this.#debounceTimer);
       this.#debounceTimer = null;
     }
 
-    if (this.#onModifyRef !== null) {
-      vault.off("modify", this.#onModifyRef);
-    }
-    if (this.#onDeleteRef !== null) {
-      vault.off("delete", this.#onDeleteRef);
-    }
-    if (this.#onRenameRef !== null) {
-      vault.off("rename", this.#onRenameRef);
-    }
-  }
-
-  /**
-   * Cancel any pending debounce operations before starting a full reindex.
-   */
-  public cancelPending(): void {
-    if (this.#debounceTimer !== null) {
-      clearTimeout(this.#debounceTimer);
-      this.#debounceTimer = null;
-    }
-
-    this.#debouncePending = [];
+    this.vault.offref(this.#onModifyRef);
+    this.vault.offref(this.#onDeleteRef);
+    this.vault.offref(this.#onRenameRef);
   }
 
   #enqueueFileEvent(
@@ -158,12 +84,12 @@ class ChangeTracker {
       try {
         switch (op.type) {
           case "modify": {
-            this.indexer.enqueueEdit(op.file);
+            this.rag.index(op.file);
             break;
           }
 
           case "delete": {
-            this.indexer.enqueueDelete(op.file);
+            this.rag.delete(op.file);
             break;
           }
 
@@ -175,8 +101,8 @@ class ChangeTracker {
               );
               continue;
             }
-            const content = await this.vault.read(op.file);
-            this.indexer.enqueueRename(op.oldPath, op.file, content);
+            this.rag.delete(op.file);
+            this.rag.index(op.file);
             break;
           }
         }

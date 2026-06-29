@@ -106,3 +106,40 @@
   margin: 0;
   padding: 6px 12px;
 }
+
+/* ── Loading Indicator ───────────────────────────────────────────────────────── */
+
+.yggdrasil-chat-loading-content {
+  display: flex;
+  align-items: center;
+  gap: var(--size-2-2);
+}
+
+.yggdrasil-chat-spinner {
+  width: var(--size-4-4);
+  height: var(--size-4-4);
+  border: 2px solid var(--background-modifier-border);
+  border-top-color: var(--interactive-accent);
+  border-radius: 50%;
+  animation: yggdrasil-spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes yggdrasil-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.yggdrasil-chat-loading-dots::after {
+  content: "";
+  animation: yggdrasil-dots 1.5s steps(4, end) infinite;
+}
+
+@keyframes yggdrasil-dots {
+  0% { content: ""; }
+  25% { content: "."; }
+  50% { content: ".."; }
+  75% { content: "..."; }
+  100% { content: "..."; }
+}

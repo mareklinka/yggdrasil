@@ -45,8 +45,13 @@
   "module": "ESNext",
   "type": "module",
   "dependencies": {
+    "@langchain/classic": "^1.0.38",
+    "@langchain/core": "^1.2.1",
+    "@langchain/openai": "^1.5.3",
     "@orama/orama": "^3.1.18",
     "@orama/plugin-data-persistence": "^3.1.18",
-    "pako": "^3.0.0"
+    "langchain": "^1.5.2",
+    "pako": "^3.0.0",
+    "zod": "^4.4.3"
   }
 }
