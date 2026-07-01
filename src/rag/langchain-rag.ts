@@ -1,10 +1,8 @@
 import { Document as LangchainDocument } from "@langchain/core/documents";
-import type { GraphRunStream } from "@langchain/langgraph";
 import { ChatOpenAI } from "@langchain/openai";
 import type { TFile, Vault } from "obsidian";
 import { deflate, inflate } from "pako";
 
-import type { AgentStateType} from "./adapters/agent";
 import { LangchainAgentAdapter } from "./adapters/agent";
 import { LangchainEmbeddingsAdapter } from "./adapters/embeddings";
 import { RetrieveToolAdapter } from "./adapters/retrieve-tool";
@@ -71,44 +69,9 @@ export class LangchainRag {
     this.#vectorStore.setVectors(filtered);
   }
 
-  #stream: GraphRunStream<AgentStateType, Record<string, never>> | null = null;
-
   public async query(query: string): Promise<string> {
     console.log("Querying agent with messages:", query);
-
-    const stream = await this.#agent.streamEvents(query);
-
-    this.#stream = stream;
-
-    const tokens: Array<string> = [];
-
-    await (async (): Promise<void> => {
-      for await (const message of stream.messages) {
-        for await (const token of message.text) {
-          tokens.push(token);
-        }
-      }
-    })();
-
-    try {
-      return tokens.join("");
-    } catch (error) {
-      console.error(
-        "Error retrieving final output from the agent stream:",
-        error,
-      );
-
-      return "There was an error processing your request. Please try again.";
-    } finally {
-      this.#stream = null;
-    }
-  }
-
-  public cancelQuery(): void {
-    if (this.#stream !== null) {
-      this.#stream.abort();
-      this.#stream = null;
-    }
+    return this.#agent.invoke(query);
   }
 
   async #saveToDisk(): Promise<void> {

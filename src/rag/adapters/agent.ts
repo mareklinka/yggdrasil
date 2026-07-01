@@ -1,10 +1,10 @@
+import type { ContentBlock } from "@langchain/core/messages";
 import {
   AIMessage,
   HumanMessage,
   SystemMessage,
 } from "@langchain/core/messages";
 import { tool } from "@langchain/core/tools";
-import type { GraphRunStream } from "@langchain/langgraph";
 import { END, START, StateGraph } from "@langchain/langgraph";
 import { Annotation, MessagesAnnotation } from "@langchain/langgraph";
 import { ToolNode } from "@langchain/langgraph/prebuilt";
@@ -32,14 +32,18 @@ const AgentState = Annotation.Root({
     reducer: (current, update) => update ?? current ?? "",
     default: () => "",
   }),
+
+  // Evaluator's routing decision
+  evaluatorDecision: Annotation<"end" | "retriever" | "tools" | undefined>({
+    reducer: (current, update) => update ?? current,
+    default: () => undefined,
+  }),
 });
 
 export type AgentStateType = typeof AgentState.State;
 
 export class LangchainAgentAdapter implements IAgent {
-  readonly #streamer: (
-    input: string,
-  ) => Promise<GraphRunStream<AgentStateType, Record<string, never>>>;
+  readonly #invoker: (input: string) => Promise<string>;
 
   public constructor(options: {
     model: ChatOpenAI;
@@ -58,11 +62,17 @@ export class LangchainAgentAdapter implements IAgent {
       },
     );
 
+    // Main LLM bound to tools for agent loop
     const llm = options.model.bindTools([t]);
+
+    // Separate LLM instance for evaluation (not bound to tools, so its events don't leak into the graph stream)
+    const evaluationLlm = options.model.bindTools([]);
 
     const callModel = async (
       state: typeof AgentState.State,
     ): Promise<Partial<typeof AgentState.State>> => {
+      console.log("Calling model with state:", state);
+
       const messages = [
         new SystemMessage(options.systemPrompt),
         ...state.messages,
@@ -75,14 +85,100 @@ export class LangchainAgentAdapter implements IAgent {
       };
     };
 
-    // Node 2: Execute tools (using the prebuilt ToolNode)
     const toolNode = new ToolNode([t]);
 
-    // Conditional edge: should we continue to tools or end?
-    const shouldContinue = (
+    const evaluateAnswer = async (
       state: typeof AgentState.State,
-    ): "tools" | typeof END => {
-      console.log("Checking continue", state);
+    ): Promise<Partial<typeof AgentState.State>> => {
+      console.log("Evaluating answer quality for state:", state);
+
+      const lastMessage = state.messages[state.messages.length - 1];
+      const content =
+        lastMessage instanceof AIMessage ? lastMessage.content : "";
+
+      // Helper to extract text content from message content (string or array)
+      const extractText = (
+        c: string | Array<ContentBlock | string>,
+      ): string => {
+        if (typeof c === "string") {
+          return c;
+        }
+        return c
+          .filter(
+            (block): block is ContentBlock | string =>
+              typeof block === "string" || block.type === "text",
+          )
+          .map((block) => (typeof block === "string" ? block : block.text))
+          .join("\n");
+      };
+
+      const answerText = extractText(content).trim();
+
+      // Store the proposed answer
+      const finalAnswer: string = answerText;
+
+      // Use LLM to evaluate answer quality
+      const evaluationPrompt = [
+        new SystemMessage(
+          "You are an evaluator for a D&D campaign notes assistant. " +
+            "Assess the quality of the AI's last response with these criteria:\n" +
+            "- Does it answer the user's question about campaign lore, NPCs, locations, or session history?\n" +
+            "- Is it accurate and consistent with the retrieved notes? (Check for hallucinations or contradictions)\n" +
+            "- Is it sufficiently detailed and helpful for a DM or player?\n" +
+            "- Does it avoid vague, generic, or incomplete answers?\n" +
+            "Return a JSON object with 'quality' (good/poor) and 'reason' (brief explanation).",
+        ),
+        new HumanMessage(
+          `User query: ${extractText(state.messages[0]?.content) ?? "N/A"}\n\nAI response: ${answerText}`,
+        ),
+      ];
+
+      const evaluationResponse = await evaluationLlm.invoke(evaluationPrompt);
+      const evaluationContent =
+        evaluationResponse instanceof AIMessage
+          ? evaluationResponse.content
+          : "";
+
+      // Parse the evaluation result using Zod
+      const EvaluationSchema = z.object({
+        quality: z.enum(["good", "poor"]),
+        reason: z.string(),
+      });
+
+      let decision: "end" | "retriever" = "end";
+      const messages = [...state.messages];
+
+      try {
+        const evaluationText = extractText(evaluationContent);
+        const jsonMatch = evaluationText.match(/\{[^}]*\}/);
+        if (jsonMatch) {
+          const parsed = EvaluationSchema.safeParse(JSON.parse(jsonMatch[0]));
+          if (parsed.success && parsed.data.quality === "poor") {
+            decision = "retriever";
+            messages.push(
+              new HumanMessage("Evaluation result: " + parsed.data.reason),
+            );
+          } else {
+            messages.splice(messages.length - 1, 1); // Remove last AI message if evaluation is good
+          }
+        }
+      } catch {
+        // If parsing fails, default to ending (conservative approach)
+        console.warn("Failed to parse evaluation response, defaulting to end");
+      }
+
+      return {
+        finalAnswer,
+        toolCallCount: state.toolCallCount,
+        evaluatorDecision: decision,
+        messages: messages,
+      };
+    };
+
+    // Conditional edge from model: should we continue to tools or evaluator?
+    const shouldContinueFromModel = (
+      state: typeof AgentState.State,
+    ): typeof toolsNode | typeof evaluatorNode => {
       const lastMessage = state.messages[state.messages.length - 1];
 
       // If the last message has tool calls, route to tools
@@ -91,41 +187,54 @@ export class LangchainAgentAdapter implements IAgent {
         lastMessage.tool_calls &&
         lastMessage.tool_calls.length > 0
       ) {
-        return "tools";
+        return toolsNode;
       }
 
-      // Otherwise, we're done
+      // Otherwise, route to evaluator for quality check
+      return evaluatorNode;
+    };
+
+    // Conditional edge from evaluator: should we retry or end?
+    const shouldContinueFromEvaluator = (
+      state: typeof AgentState.State,
+    ): typeof retrieverNode | typeof END => {
+      // Use the evaluator's LLM-based decision
+      if (state.evaluatorDecision === retrieverNode) {
+        return retrieverNode;
+      }
       return END;
     };
 
     const graph = new StateGraph(AgentState)
       // Add nodes
       .addNode(retrieverNode, callModel)
+      .addNode(evaluatorNode, evaluateAnswer)
       .addNode(toolsNode, toolNode)
 
       // Add edges
       .addEdge(START, retrieverNode)
-      .addConditionalEdges(retrieverNode, shouldContinue, {
+      .addConditionalEdges(retrieverNode, shouldContinueFromModel, {
         tools: toolsNode,
-        [END]: END,
+        [evaluatorNode]: evaluatorNode,
       })
-      .addEdge(toolsNode, retrieverNode);
+      .addEdge(toolsNode, retrieverNode)
+      .addConditionalEdges(evaluatorNode, shouldContinueFromEvaluator, {
+        retriever: retrieverNode,
+        [END]: END,
+      });
 
     const compiledGraph = graph.compile();
 
     // Compile the graph
-    this.#streamer = (
-      input: string,
-    ): Promise<GraphRunStream<AgentStateType, Record<string, never>>> =>
-      compiledGraph.streamEvents(
-        { messages: [new HumanMessage(input)] },
-        { version: "v3" },
-      );
+    this.#invoker = async (input: string): Promise<string> =>
+      (
+        await compiledGraph.invoke({
+          messages: [new HumanMessage(input)],
+        })
+      ).finalAnswer;
   }
 
-  public streamEvents(
-    input: string,
-  ): Promise<GraphRunStream<AgentStateType, Record<string, never>>> {
-    return this.#streamer(input);
+  public invoke(input: string): Promise<string> {
+    return this.#invoker(input);
   }
 }

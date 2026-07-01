@@ -1,7 +1,4 @@
 import type { Document } from "@langchain/core/documents";
-import type { GraphRunStream } from "@langchain/langgraph";
-
-import type { AgentStateType } from "./adapters/agent";
 
 /** Splits document content into chunks for vectorization. */
 export interface IDocumentSplitter {
@@ -33,7 +30,5 @@ export interface IRetrieveTool {
 
 /** Runs an agent with tools and system prompt. */
 export interface IAgent {
-  streamEvents(
-    query: string,
-  ): Promise<GraphRunStream<AgentStateType, Record<string, never>>>;
+  invoke(query: string): Promise<string>;
 }
