@@ -2,7 +2,7 @@ import type { App, PluginManifest, WorkspaceLeaf } from "obsidian";
 import { Notice, Plugin } from "obsidian";
 
 import { ChangeTracker } from "./rag/change-tracker";
-import { LangchainRag } from "./rag/langchain-rag";
+import { createLangchainRag } from "./rag/langchain-rag";
 import { CHAT_VIEW_TYPE, ChatView } from "./ui/chat-view";
 import { ReindexConfirmationModal } from "./ui/reindex-confirmation-modal";
 
@@ -13,7 +13,7 @@ export default class YggdrasilPlugin extends Plugin {
   public constructor(app: App, manifest: PluginManifest) {
     super(app, manifest);
 
-    this.#rag = new LangchainRag(this.app.vault, {
+    this.#rag = createLangchainRag(this.app.vault, {
       dbPath: `${this.app.vault.configDir}/plugins/${this.manifest.id}/vector_store.data`,
     });
 

@@ -1,100 +1,55 @@
-/* eslint-disable max-len */
-import { MemoryVectorStore } from "@langchain/classic/vectorstores/memory";
-import { Document } from "@langchain/core/documents";
+import { Document as LangchainDocument } from "@langchain/core/documents";
 import type { ClientTool, ServerTool } from "@langchain/core/tools";
-import { tool } from "@langchain/core/tools";
-import { ChatOpenAI, OpenAIEmbeddings } from "@langchain/openai";
-import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
+import { ChatOpenAI } from "@langchain/openai";
 import type { AgentRunStream } from "langchain";
-import { createAgent } from "langchain";
 import type { TFile, Vault } from "obsidian";
 import { deflate, inflate } from "pako";
-import * as z from "zod";
 
+import { LangchainAgentAdapter } from "./adapters/agent";
+import { LangchainEmbeddingsAdapter } from "./adapters/embeddings";
+import { RetrieveToolAdapter } from "./adapters/retrieve-tool";
+import { LangchainSplitterAdapter } from "./adapters/splitter";
+import { LangchainVectorStoreAdapter } from "./adapters/vector-store";
+import type { IAgent, IDocumentSplitter, IVectorStore } from "./interfaces";
 import { systemPrompt } from "./prompts";
 
 export class LangchainRag {
-  readonly #agent: ReturnType<typeof createAgent>;
-  readonly #splitter: RecursiveCharacterTextSplitter;
-  readonly #vectorStore: MemoryVectorStore;
+  readonly #vault: Vault;
+  readonly #dbPath: string;
+  readonly #splitter: IDocumentSplitter;
+  readonly #vectorStore: IVectorStore;
+  readonly #agent: IAgent;
 
   public constructor(
-    private readonly vault: Vault,
-    private readonly config: { dbPath: string },
+    vault: Vault,
+    config: { dbPath: string },
+    splitter: IDocumentSplitter,
+    vectorStore: IVectorStore,
+    agent: IAgent,
   ) {
-    this.#splitter = new RecursiveCharacterTextSplitter({
-      chunkSize: 500,
-      chunkOverlap: 100,
-    });
+    this.#vault = vault;
+    this.#dbPath = config.dbPath;
+    this.#splitter = splitter;
+    this.#vectorStore = vectorStore;
+    this.#agent = agent;
 
-    const embeddings = new OpenAIEmbeddings({
-      model: "v5-small-retrieval-Q8_0.gguf",
-      configuration: {
-        // eslint-disable-next-line @typescript-eslint/naming-convention
-        baseURL: "http://127.0.0.1:10001/v1",
-      },
-      dimensions: 1024,
-      apiKey: "-",
-    });
-
-    this.#vectorStore = new MemoryVectorStore(embeddings);
     this.#loadFromDisk();
-
-    const retrieveSchema = z.object({ query: z.string() });
-    const retrieve = tool(
-      async ({ query }) => {
-        const retrievedDocs = await this.#vectorStore.similaritySearch(
-          query,
-          5,
-        );
-        const serialized = retrievedDocs
-          .map(
-            (doc) =>
-              `Source: ${doc.metadata.source}\nContent: ${doc.pageContent}`,
-          )
-          .join("\n");
-        return [serialized, retrievedDocs];
-      },
-      {
-        name: "retrieve",
-        description: "Retrieve information related to a query.",
-        schema: retrieveSchema,
-        responseFormat: "content_and_artifact",
-      },
-    );
-
-    const model = new ChatOpenAI({
-      model: "/model/Qwen3.6-mtp-35B-A3B-UD-Q4_K_XL.gguf",
-      configuration: {
-        // eslint-disable-next-line @typescript-eslint/naming-convention
-        baseURL: "http://127.0.0.1:9001/v1",
-        apiKey: "-",
-      },
-    });
-
-
-
-    this.#agent = createAgent({
-      model: model,
-      tools: [retrieve],
-      systemPrompt: systemPrompt,
-    });
   }
 
   public async index(...files: Array<TFile>): Promise<void> {
     console.log("Indexing", files.length, "files...");
 
-    const docs: Array<Document> = [];
+    const docs: Array<LangchainDocument> = [];
 
     for (const file of files) {
-      const content = await this.vault.cachedRead(file);
+      const content = await this.#vault.cachedRead(file);
 
       console.log(
         `Loaded document: ${file.path} (${content.length} characters)`,
       );
 
       docs.push(
-        new Document({
+        new LangchainDocument({
           pageContent: content,
           metadata: { path: file.path },
         }),
@@ -109,9 +64,11 @@ export class LangchainRag {
   }
 
   public async delete(file: TFile): Promise<void> {
-    this.#vectorStore.memoryVectors = this.#vectorStore.memoryVectors.filter(
-      (_) => _.metadata.path !== file.path,
+    const vectors = this.#vectorStore.getVectors();
+    const filtered = (vectors as Array<{ metadata: { path: string } }>).filter(
+      (v) => v.metadata.path !== file.path,
     );
+    this.#vectorStore.setVectors(filtered);
   }
 
   #stream: AgentRunStream<
@@ -150,7 +107,7 @@ export class LangchainRag {
       })(),
       (async (): Promise<void> => {
         for await (const call of stream.toolCalls) {
-          console.log("Tool call:", call.name, call.input);
+          console.log("Tool call:", call);
         }
       })(),
     ]);
@@ -177,40 +134,79 @@ export class LangchainRag {
   }
 
   async #saveToDisk(): Promise<void> {
-    const json = JSON.stringify(this.#vectorStore.memoryVectors);
+    const vectors = this.#vectorStore.getVectors();
+    const json = JSON.stringify(vectors);
     const compressed = deflate(json, { level: -1 });
-    await this.vault.adapter.writeBinary(
-      this.config.dbPath,
+    await this.#vault.adapter.writeBinary(
+      this.#dbPath,
       compressed.buffer as ArrayBuffer,
     );
 
     console.log(
-      `Vector store persisted to ${this.config.dbPath}, containing ${this.#vectorStore.memoryVectors.length} chunk(s).`,
+      `Vector store persisted to ${this.#dbPath}, containing ${vectors.length} chunk(s).`,
     );
   }
 
   async #loadFromDisk(): Promise<void> {
-    if (!(await this.vault.adapter.exists(this.config.dbPath))) {
+    if (!(await this.#vault.adapter.exists(this.#dbPath))) {
       return;
     }
 
     try {
-      const compressed = await this.vault.adapter.readBinary(
-        this.config.dbPath,
-      );
+      const compressed = await this.#vault.adapter.readBinary(this.#dbPath);
       const json = inflate(new Uint8Array(compressed), { toText: true });
       const raw = JSON.parse(json);
 
-      this.#vectorStore.memoryVectors = raw;
+      this.#vectorStore.setVectors(raw);
 
       console.log(
-        `Vector store loaded from ${this.config.dbPath}, containing ${this.#vectorStore.memoryVectors.length} chunk(s).`,
+        `Vector store loaded from ${this.#dbPath}, containing ${raw.length} chunk(s).`,
       );
     } catch {
       throw new Error(
-        `Failed to load vector store from ${this.config.dbPath}. ` +
+        `Failed to load vector store from ${this.#dbPath}. ` +
           "The file may be missing or corrupted.",
       );
     }
   }
+}
+
+/**
+ * Creates a fully wired LangchainRag instance with default langchain adapters.
+ * Use this in your composition root (e.g., Obsidian plugin's onload).
+ */
+export function createLangchainRag(
+  vault: Vault,
+  config: { dbPath: string },
+): LangchainRag {
+  const splitter = new LangchainSplitterAdapter(500, 100);
+
+  const embeddings = new LangchainEmbeddingsAdapter({
+    model: "v5-small-retrieval-Q8_0.gguf",
+    // eslint-disable-next-line @typescript-eslint/naming-convention
+    baseUrl: "http://127.0.0.1:10001/v1",
+    dimensions: 1024,
+    apiKey: "-",
+  });
+
+  const vectorStore = new LangchainVectorStoreAdapter(embeddings);
+
+  const chatModel = new ChatOpenAI({
+    model: "/model/Qwen3.6-mtp-35B-A3B-UD-Q4_K_XL.gguf",
+    configuration: {
+      // eslint-disable-next-line @typescript-eslint/naming-convention
+      baseURL: "http://127.0.0.1:9001/v1",
+      apiKey: "-",
+    },
+  });
+
+  const retrieveTool = new RetrieveToolAdapter(vectorStore);
+
+  const agent = new LangchainAgentAdapter({
+    model: chatModel,
+    retrieveTool,
+    systemPrompt,
+  });
+
+  return new LangchainRag(vault, config, splitter, vectorStore, agent);
 }
