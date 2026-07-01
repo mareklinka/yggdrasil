@@ -1,10 +1,10 @@
 import { Document as LangchainDocument } from "@langchain/core/documents";
-import type { ClientTool, ServerTool } from "@langchain/core/tools";
+import type { GraphRunStream } from "@langchain/langgraph";
 import { ChatOpenAI } from "@langchain/openai";
-import type { AgentRunStream } from "langchain";
 import type { TFile, Vault } from "obsidian";
 import { deflate, inflate } from "pako";
 
+import type { AgentStateType} from "./adapters/agent";
 import { LangchainAgentAdapter } from "./adapters/agent";
 import { LangchainEmbeddingsAdapter } from "./adapters/embeddings";
 import { RetrieveToolAdapter } from "./adapters/retrieve-tool";
@@ -71,46 +71,24 @@ export class LangchainRag {
     this.#vectorStore.setVectors(filtered);
   }
 
-  #stream: AgentRunStream<
-    unknown,
-    ReadonlyArray<ClientTool | ServerTool>,
-    Record<string, unknown>
-  > | null = null;
+  #stream: GraphRunStream<AgentStateType, Record<string, never>> | null = null;
 
-  public async query(
-    messages: Array<{ role: "user" | "assistant"; content: string }>,
-  ): Promise<string> {
-    const agentInputs = {
-      messages: messages.map((msg) => ({
-        role: msg.role,
-        content: msg.content,
-      })),
-    };
+  public async query(query: string): Promise<string> {
+    console.log("Querying agent with messages:", query);
 
-    console.log("Querying agent with messages:", agentInputs.messages);
-
-    const stream = await this.#agent.streamEvents(agentInputs, {
-      version: "v3",
-    });
+    const stream = await this.#agent.streamEvents(query);
 
     this.#stream = stream;
 
     const tokens: Array<string> = [];
 
-    await Promise.all([
-      (async (): Promise<void> => {
-        for await (const message of stream.messages) {
-          for await (const token of message.text) {
-            tokens.push(token);
-          }
+    await (async (): Promise<void> => {
+      for await (const message of stream.messages) {
+        for await (const token of message.text) {
+          tokens.push(token);
         }
-      })(),
-      (async (): Promise<void> => {
-        for await (const call of stream.toolCalls) {
-          console.log("Tool call:", call);
-        }
-      })(),
-    ]);
+      }
+    })();
 
     try {
       return tokens.join("");
@@ -183,7 +161,6 @@ export function createLangchainRag(
 
   const embeddings = new LangchainEmbeddingsAdapter({
     model: "v5-small-retrieval-Q8_0.gguf",
-    // eslint-disable-next-line @typescript-eslint/naming-convention
     baseUrl: "http://127.0.0.1:10001/v1",
     dimensions: 1024,
     apiKey: "-",
@@ -191,7 +168,7 @@ export function createLangchainRag(
 
   const vectorStore = new LangchainVectorStoreAdapter(embeddings);
 
-  const chatModel = new ChatOpenAI({
+  const rawChatModel = new ChatOpenAI({
     model: "/model/Qwen3.6-mtp-35B-A3B-UD-Q4_K_XL.gguf",
     configuration: {
       // eslint-disable-next-line @typescript-eslint/naming-convention
@@ -203,7 +180,7 @@ export function createLangchainRag(
   const retrieveTool = new RetrieveToolAdapter(vectorStore);
 
   const agent = new LangchainAgentAdapter({
-    model: chatModel,
+    model: rawChatModel,
     retrieveTool,
     systemPrompt,
   });

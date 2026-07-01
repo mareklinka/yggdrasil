@@ -100,7 +100,7 @@ export class ChatView extends ItemView {
       this.#showLoading();
 
       try {
-        const response = await this.rag.query(this.#messages);
+        const response = await this.rag.query(text);
         this.#messages.push({ content: response, role: "assistant" });
         this.#renderMessage(response, "assistant");
       } finally {
