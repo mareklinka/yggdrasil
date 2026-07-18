@@ -34,9 +34,15 @@ const AgentState = Annotation.Root({
   }),
 
   // Evaluator's routing decision
-  evaluatorDecision: Annotation<"end" | "retriever" | "tools" | undefined>({
+  evaluatorDecision: Annotation<"end" | "retriever" | undefined>({
     reducer: (current, update) => update ?? current,
     default: () => undefined,
+  }),
+
+  // Number of times the retriever node has been executed
+  retrieverCallCount: Annotation<number>({
+    reducer: (_current, update) => update ?? 0,
+    default: () => 0,
   }),
 });
 
@@ -67,11 +73,40 @@ export class LangchainAgentAdapter implements IAgent {
 
     // Separate LLM instance for evaluation (not bound to tools, so its events don't leak into the graph stream)
     const evaluationLlm = options.model.bindTools([]);
+    const MAX_RETRIEVER_ITERATIONS = 3;
+
+    const extractText = (c: string | Array<ContentBlock | string>): string => {
+      if (typeof c === "string") {
+        return c;
+      }
+      return c
+        .filter(
+          (block): block is ContentBlock | string =>
+            typeof block === "string" || block.type === "text",
+        )
+        .map((block) => (typeof block === "string" ? block : block.text))
+        .join("\n");
+    };
+
+    const extractJson = (text: string): string => {
+      const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+      if (fenceMatch) {
+        return fenceMatch[1].trim();
+      }
+      const braceStart = text.indexOf("{");
+      const braceEnd = text.lastIndexOf("}");
+      if (braceStart !== -1 && braceEnd !== -1 && braceEnd > braceStart) {
+        return text.substring(braceStart, braceEnd + 1).trim();
+      }
+      return text.trim();
+    };
 
     const callModel = async (
       state: typeof AgentState.State,
     ): Promise<Partial<typeof AgentState.State>> => {
-      console.log("Calling model with state:", state);
+      console.log(
+        `Retriever turn (evaluation round ${state.retrieverCallCount + 1} of ${MAX_RETRIEVER_ITERATIONS})`, state
+      );
 
       const messages = [
         new SystemMessage(options.systemPrompt),
@@ -96,37 +131,31 @@ export class LangchainAgentAdapter implements IAgent {
       const content =
         lastMessage instanceof AIMessage ? lastMessage.content : "";
 
-      // Helper to extract text content from message content (string or array)
-      const extractText = (
-        c: string | Array<ContentBlock | string>,
-      ): string => {
-        if (typeof c === "string") {
-          return c;
-        }
-        return c
-          .filter(
-            (block): block is ContentBlock | string =>
-              typeof block === "string" || block.type === "text",
-          )
-          .map((block) => (typeof block === "string" ? block : block.text))
-          .join("\n");
-      };
-
       const answerText = extractText(content).trim();
 
       // Store the proposed answer
       const finalAnswer: string = answerText;
 
+      // Force end on the final allowed iteration
+      if (state.retrieverCallCount >= MAX_RETRIEVER_ITERATIONS) {
+        return {
+          finalAnswer,
+          toolCallCount: state.toolCallCount,
+          evaluatorDecision: "end",
+          messages: [...state.messages],
+        };
+      }
+
       // Use LLM to evaluate answer quality
       const evaluationPrompt = [
         new SystemMessage(
           "You are an evaluator for a D&D campaign notes assistant. " +
-            "Assess the quality of the AI's last response with these criteria:\n" +
-            "- Does it answer the user's question about campaign lore, NPCs, locations, or session history?\n" +
-            "- Is it accurate and consistent with the retrieved notes? (Check for hallucinations or contradictions)\n" +
-            "- Is it sufficiently detailed and helpful for a DM or player?\n" +
-            "- Does it avoid vague, generic, or incomplete answers?\n" +
-            "Return a JSON object with 'quality' (good/poor) and 'reason' (brief explanation).",
+          "Assess the quality of the AI's last response with these criteria:\n" +
+          "- Does it answer the user's question about campaign lore, NPCs, locations, or session history?\n" +
+          "- Is it accurate and consistent with the retrieved notes? (Check for hallucinations or contradictions)\n" +
+          "- Is it sufficiently detailed and helpful for a DM or player?\n" +
+          "- Does it avoid vague, generic, or incomplete answers?\n" +
+          "Return a JSON object with 'quality' (good/poor) and 'reason' (brief explanation).",
         ),
         new HumanMessage(
           `User query: ${extractText(state.messages[0]?.content) ?? "N/A"}\n\nAI response: ${answerText}`,
@@ -146,27 +175,41 @@ export class LangchainAgentAdapter implements IAgent {
       });
 
       let decision: "end" | "retriever" = "end";
+      let nextCallCount = state.retrieverCallCount;
       const messages = [...state.messages];
 
       try {
         const evaluationText = extractText(evaluationContent);
 
-        const parsed = EvaluationSchema.safeParse(JSON.parse(evaluationText));
+        const parsed = EvaluationSchema.safeParse(
+          JSON.parse(extractJson(evaluationText)),
+        );
         if (parsed.success && parsed.data.quality === "poor") {
           decision = "retriever";
+          nextCallCount = state.retrieverCallCount + 1;
           messages.push(
             new HumanMessage("Evaluation result: " + parsed.data.reason),
           );
         }
-      } catch {
+      } catch (e) {
         // If parsing fails, default to ending (conservative approach)
-        console.warn("Failed to parse evaluation response, defaulting to end");
+        console.warn(
+          "Failed to parse evaluation response, defaulting to end",
+          e,
+        );
       }
+
+      console.log(
+        `Evaluator result:", `,
+        decision,
+        { decision: decision, answer: answerText }
+      );
 
       return {
         finalAnswer,
         toolCallCount: state.toolCallCount,
         evaluatorDecision: decision,
+        retrieverCallCount: nextCallCount,
         messages: messages,
       };
     };
