@@ -74,6 +74,65 @@
   border: 1px solid var(--background-modifier-border);
 }
 
+/* ── Condensed Markdown Spacing (assistant bubbles) ──────────────────────────── */
+
+.yggdrasil-chat-bubble--assistant > p,
+.yggdrasil-chat-bubble--assistant > div > p {
+  margin-block: 0 !important;
+}
+
+.yggdrasil-chat-bubble--assistant > h1,
+.yggdrasil-chat-bubble--assistant > h2,
+.yggdrasil-chat-bubble--assistant > h3,
+.yggdrasil-chat-bubble--assistant > h4,
+.yggdrasil-chat-bubble--assistant > h5,
+.yggdrasil-chat-bubble--assistant > h6,
+.yggdrasil-chat-bubble--assistant > div > h1,
+.yggdrasil-chat-bubble--assistant > div > h2,
+.yggdrasil-chat-bubble--assistant > div > h3,
+.yggdrasil-chat-bubble--assistant > div > h4,
+.yggdrasil-chat-bubble--assistant > div > h5,
+.yggdrasil-chat-bubble--assistant > div > h6 {
+  margin-block: 0 !important;
+}
+
+.yggdrasil-chat-bubble--assistant > blockquote,
+.yggdrasil-chat-bubble--assistant > div > blockquote {
+  margin-block: 0 !important;
+}
+
+.yggdrasil-chat-bubble--assistant > ul,
+.yggdrasil-chat-bubble--assistant > ol,
+.yggdrasil-chat-bubble--assistant > div > ul,
+.yggdrasil-chat-bubble--assistant > div > ol {
+  margin-block: 0 !important;
+  padding-inline-start: 1.2em;
+}
+
+.yggdrasil-chat-bubble--assistant li {
+  margin-block: 0 !important;
+}
+
+.yggdrasil-chat-bubble--assistant > hr,
+.yggdrasil-chat-bubble--assistant > div > hr {
+  margin-block: 0 !important;
+}
+
+.yggdrasil-chat-bubble--assistant > pre,
+.yggdrasil-chat-bubble--assistant > div > pre {
+  margin-block: 0 !important;
+}
+
+.yggdrasil-chat-bubble--assistant > table,
+.yggdrasil-chat-bubble--assistant > div > table {
+  margin-block: 0 !important;
+}
+
+.yggdrasil-chat-bubble--assistant > img,
+.yggdrasil-chat-bubble--assistant > div > img {
+  margin-block: 0 !important;
+}
+
 /* ── Bubble Content (inner div) ──────────────────────────────────────────────── */
 
 .yggdrasil-chat-bubble-content {
@@ -137,9 +196,19 @@
 }
 
 @keyframes yggdrasil-dots {
-  0% { content: ""; }
-  25% { content: "."; }
-  50% { content: ".."; }
-  75% { content: "..."; }
-  100% { content: "..."; }
+  0% {
+    content: "";
+  }
+  25% {
+    content: ".";
+  }
+  50% {
+    content: "..";
+  }
+  75% {
+    content: "...";
+  }
+  100% {
+    content: "...";
+  }
 }

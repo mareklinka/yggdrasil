@@ -84,7 +84,12 @@ export class LangchainAgentAdapter implements IAgent {
           (block): block is ContentBlock | string =>
             typeof block === "string" || block.type === "text",
         )
-        .map((block) => (typeof block === "string" ? block : block.text))
+        .map((block) => {
+          if (typeof block === "string") {
+            return block.replace(/\n+$/, "");
+          }
+          return (block.text as string).replace(/\n+$/, "");
+        })
         .join("\n");
     };
 
@@ -105,7 +110,8 @@ export class LangchainAgentAdapter implements IAgent {
       state: typeof AgentState.State,
     ): Promise<Partial<typeof AgentState.State>> => {
       console.log(
-        `Retriever turn (evaluation round ${state.retrieverCallCount + 1} of ${MAX_RETRIEVER_ITERATIONS})`, state
+        `Retriever turn (evaluation round ${state.retrieverCallCount + 1} of ${MAX_RETRIEVER_ITERATIONS})`,
+        state,
       );
 
       const messages = [
@@ -199,11 +205,10 @@ export class LangchainAgentAdapter implements IAgent {
         );
       }
 
-      console.log(
-        `Evaluator result:", `,
-        decision,
-        { decision: decision, answer: answerText }
-      );
+      console.log(`Evaluator result:", `, decision, {
+        decision: decision,
+        answer: answerText,
+      });
 
       return {
         finalAnswer,
