@@ -11,7 +11,7 @@ src/
 │   ├── chunker.ts       # Token-aware markdown chunking
 │   ├── embedder.ts      # Embedding client (LiteLLM proxy)
 │   ├── indexer.ts       # Indexing orchestrator
-│   └── vector-store.ts  # Orama vector store
+│   └── vector-store.ts  # Vector store
 tests/                   # Vitest unit tests
 test-vault/              # Test Obsidian vault
 ```
@@ -27,4 +27,4 @@ npm test             # Run unit tests
 
 ## SDLC
 
-This project follows the mandatory 6-stage SDLC workflow defined in [`.github/sdlc.md`](.github/sdlc.md). All development is guided by PRDs in `docs/prds/`.
+This project follows the mandatory 6-stage SDLC workflow defined in [`.opencode/sdlc.md`](.opencode/sdlc.md). All development is guided by PRDs in `docs/prds/`.
