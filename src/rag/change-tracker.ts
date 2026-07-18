@@ -27,21 +27,24 @@ export class ChangeTracker {
     private readonly vault: Vault,
     private readonly rag: LangchainRag,
   ) {
-    this.#onModifyRef = this.vault.on('modify', (file: TAbstractFile): void => {
+    this.#onModifyRef = this.vault.on("modify", (file: TAbstractFile): void => {
       if (file instanceof TFile) {
         this.#enqueueFileEvent("modify", file);
       }
     });
-    this.#onDeleteRef = this.vault.on('delete', (file: TAbstractFile): void => {
+    this.#onDeleteRef = this.vault.on("delete", (file: TAbstractFile): void => {
       if (file instanceof TFile) {
         this.#enqueueFileEvent("delete", file);
       }
     });
-    this.#onRenameRef = this.vault.on('rename', (file: TAbstractFile, oldPath: string): void => {
-      if (file instanceof TFile) {
-        this.#enqueueFileEvent("rename", file, oldPath);
-      }
-    });
+    this.#onRenameRef = this.vault.on(
+      "rename",
+      (file: TAbstractFile, oldPath: string): void => {
+        if (file instanceof TFile) {
+          this.#enqueueFileEvent("rename", file, oldPath);
+        }
+      },
+    );
   }
 
   public unregisterEventListeners(): void {
@@ -84,12 +87,13 @@ export class ChangeTracker {
       try {
         switch (op.type) {
           case "modify": {
-            this.rag.index(op.file);
+            this.rag.delete(op.file.path);
+            await this.rag.index(op.file);
             break;
           }
 
           case "delete": {
-            this.rag.delete(op.file);
+            this.rag.delete(op.file.path);
             break;
           }
 
@@ -101,8 +105,8 @@ export class ChangeTracker {
               );
               continue;
             }
-            this.rag.delete(op.file);
-            this.rag.index(op.file);
+            this.rag.delete(op.oldPath);
+            await this.rag.index(op.file);
             break;
           }
         }

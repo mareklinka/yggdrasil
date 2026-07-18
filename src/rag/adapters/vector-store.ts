@@ -14,6 +14,15 @@ export class LangchainVectorStoreAdapter implements IVectorStore {
     return this.#store.addDocuments(docs);
   }
 
+  public deleteDocumentsByPath(path: string): void {
+    const vectors = this.getVectors() as Array<{
+      metadata: { path: string };
+    }>;
+    const filtered = vectors.filter((v) => v.metadata.path !== path);
+    console.log('Removed', vectors.length - filtered.length, 'chunk(s)');
+    this.setVectors(filtered);
+  }
+
   public similaritySearch(query: string, k: number): Promise<Array<Document>> {
     return this.#store.similaritySearch(query, k);
   }

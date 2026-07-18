@@ -14,6 +14,7 @@ export interface IEmbeddings {
 /** Stores and retrieves document embeddings. */
 export interface IVectorStore {
   addDocuments(docs: Array<Document>): Promise<void>;
+  deleteDocumentsByPath(path: string): void;
   similaritySearch(query: string, k: number): Promise<Array<Document>>;
   setVectors(vecs: Array<unknown>): void;
   getVectors(): Array<unknown>;

@@ -61,12 +61,8 @@ export class LangchainRag {
     await this.#saveToDisk();
   }
 
-  public async delete(file: TFile): Promise<void> {
-    const vectors = this.#vectorStore.getVectors();
-    const filtered = (vectors as Array<{ metadata: { path: string } }>).filter(
-      (v) => v.metadata.path !== file.path,
-    );
-    this.#vectorStore.setVectors(filtered);
+  public delete(path: string): void {
+    this.#vectorStore.deleteDocumentsByPath(path);
   }
 
   public async query(query: string): Promise<string> {

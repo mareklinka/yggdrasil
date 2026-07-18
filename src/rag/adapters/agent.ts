@@ -150,17 +150,13 @@ export class LangchainAgentAdapter implements IAgent {
 
       try {
         const evaluationText = extractText(evaluationContent);
-        const jsonMatch = evaluationText.match(/\{[^}]*\}/);
-        if (jsonMatch) {
-          const parsed = EvaluationSchema.safeParse(JSON.parse(jsonMatch[0]));
-          if (parsed.success && parsed.data.quality === "poor") {
-            decision = "retriever";
-            messages.push(
-              new HumanMessage("Evaluation result: " + parsed.data.reason),
-            );
-          } else {
-            messages.splice(messages.length - 1, 1); // Remove last AI message if evaluation is good
-          }
+
+        const parsed = EvaluationSchema.safeParse(JSON.parse(evaluationText));
+        if (parsed.success && parsed.data.quality === "poor") {
+          decision = "retriever";
+          messages.push(
+            new HumanMessage("Evaluation result: " + parsed.data.reason),
+          );
         }
       } catch {
         // If parsing fails, default to ending (conservative approach)
