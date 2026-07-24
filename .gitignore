@@ -26,3 +26,6 @@ coverage/
 .env
 .env.local
 test-vault/.obsidian/plugins/yggdrasil/vector_store.data
+
+.opencode/opencode.json
+.opencode/opencode.local.json
