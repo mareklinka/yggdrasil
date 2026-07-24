@@ -76,7 +76,7 @@ export class ChangeTracker {
     this.#debounceTimer = setTimeout(async () => {
       this.#debounceTimer = null;
       await this.#processDebounceQueue();
-    }, 1000);
+    }, 5000);
   }
 
   async #processDebounceQueue(): Promise<void> {

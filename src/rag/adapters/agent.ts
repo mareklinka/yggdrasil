@@ -11,7 +11,7 @@ import { ToolNode } from "@langchain/langgraph/prebuilt";
 import type { ChatOpenAI } from "@langchain/openai";
 import { z } from "zod";
 
-import type { IAgent, IRetrieveTool } from "../interfaces";
+import type { IVaultTool } from "../interfaces";
 
 const retrieverNode = "retriever";
 const evaluatorNode = "evaluator";
@@ -48,28 +48,27 @@ const AgentState = Annotation.Root({
 
 export type AgentStateType = typeof AgentState.State;
 
-export class LangchainAgentAdapter implements IAgent {
+export class LangchainAgentAdapter {
   readonly #invoker: (input: string) => Promise<string>;
 
   public constructor(options: {
     model: ChatOpenAI;
-    retrieveTool: IRetrieveTool;
+    tools: Array<IVaultTool>;
     systemPrompt: string;
   }) {
-    const t = tool(
-      async ({ query }) => {
-        const result = await options.retrieveTool.execute(query);
-        return result.serialized;
-      },
-      {
-        name: options.retrieveTool.toolName,
-        description: options.retrieveTool.toolDescription,
-        schema: z.object({ query: z.string() }),
-      },
+    const langchainTools = options.tools.map((vt) =>
+      tool(
+        async (params: Record<string, string>) => vt.execute(params),
+        {
+          name: vt.toolName,
+          description: vt.toolDescription,
+          schema: z.object(vt.zodSchema),
+        },
+      ),
     );
 
     // Main LLM bound to tools for agent loop
-    const llm = options.model.bindTools([t]);
+    const llm = options.model.bindTools(langchainTools);
 
     // Separate LLM instance for evaluation (not bound to tools, so its events don't leak into the graph stream)
     const evaluationLlm = options.model.bindTools([]);
@@ -126,7 +125,7 @@ export class LangchainAgentAdapter implements IAgent {
       };
     };
 
-    const toolNode = new ToolNode([t]);
+    const toolNode = new ToolNode(langchainTools);
 
     const evaluateAnswer = async (
       state: typeof AgentState.State,

@@ -10,6 +10,7 @@ import { LangchainSplitterAdapter } from "./adapters/splitter";
 import { LangchainVectorStoreAdapter } from "./adapters/vector-store";
 import type { IAgent, IDocumentSplitter, IVectorStore } from "./interfaces";
 import { systemPrompt } from "./prompts";
+import { ListFolderTool, ReadFileTool } from "./vault-tools";
 
 export class LangchainRag {
   readonly #vault: Vault;
@@ -102,7 +103,7 @@ export class LangchainRag {
     } catch {
       throw new Error(
         `Failed to load vector store from ${this.#dbPath}. ` +
-          "The file may be missing or corrupted.",
+        "The file may be missing or corrupted.",
       );
     }
   }
@@ -137,10 +138,12 @@ export function createLangchainRag(
   });
 
   const retrieveTool = new RetrieveToolAdapter(vectorStore);
+  const listFolderTool = new ListFolderTool(vault);
+  const readFileTool = new ReadFileTool(vault);
 
   const agent = new LangchainAgentAdapter({
     model: rawChatModel,
-    retrieveTool,
+    tools: [retrieveTool, listFolderTool, readFileTool],
     systemPrompt,
   });
 

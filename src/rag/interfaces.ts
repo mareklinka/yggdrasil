@@ -20,16 +20,15 @@ export interface IVectorStore {
   getVectors(): Array<unknown>;
 }
 
-/** Executes semantic search queries and returns serialized results. */
-export interface IRetrieveTool {
-  get toolName(): string;
-  get toolDescription(): string;
-  execute(
-    query: string,
-  ): Promise<{ serialized: string; docs: Array<Document> }>;
-}
-
 /** Runs an agent with tools and system prompt. */
 export interface IAgent {
   invoke(query: string): Promise<string>;
+}
+
+/** Vault filesystem tool exposed to the agent. */
+export interface IVaultTool {
+  get toolName(): string;
+  get toolDescription(): string;
+  get zodSchema(): Record<string, unknown>;
+  execute(params: Record<string, string>): Promise<string>;
 }
