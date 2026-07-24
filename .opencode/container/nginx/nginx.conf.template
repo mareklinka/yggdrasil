@@ -29,6 +29,10 @@ http {
         # only listen on the LLM port if actually provided - handled by the entrypoint script
         ${LLM_LISTEN_DIRECTIVE}
 
+        # Xena simulators
+        listen 4843;
+        listen 4844;
+
         server_name _;
 
         resolver ${NGINX_RESOLVER} valid=30s;
@@ -46,5 +50,21 @@ http {
             proxy_read_timeout 86400s;
             proxy_send_timeout 86400s;
         }
+    }
+}
+
+stream {
+    server {
+        resolver ${NGINX_RESOLVER} valid=30s;
+
+        # SQL Server containers
+        listen 1533;
+        listen 1534;
+
+        # MQTT containers
+        listen 1883;
+        listen 1884;
+
+        proxy_pass ${HOST_GATEWAY}:$server_port;
     }
 }
