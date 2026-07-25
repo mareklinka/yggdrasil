@@ -22,7 +22,10 @@ export interface IVectorStore {
 
 /** Runs an agent with tools and system prompt. */
 export interface IAgent {
-  invoke(query: string): Promise<string>;
+  invoke(
+    query: string,
+    history: Array<{ role: "user" | "assistant"; content: string }>,
+  ): Promise<string>;
 }
 
 /** Vault filesystem tool exposed to the agent. */

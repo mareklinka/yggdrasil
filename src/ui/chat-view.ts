@@ -32,6 +32,24 @@ export class ChatView extends ItemView {
     const { contentEl } = this;
     contentEl.addClass("yggdrasil-chat-view");
 
+    // Header bar
+    const headerEl: HTMLElement = contentEl.createDiv({
+      cls: "yggdrasil-chat-header",
+    });
+
+    headerEl.createEl("h2", {
+      cls: "yggdrasil-chat-header-title",
+      text: "Yggdrasil",
+    });
+
+    const newConvBtn: HTMLButtonElement = headerEl.createEl("button", {
+      cls: "yggdrasil-chat-new-conversation-btn",
+      text: "New conversation",
+    });
+    newConvBtn.addEventListener("click", (): void => {
+      this.#clearConversation();
+    });
+
     // Chat message list area
     const listEl: HTMLElement = contentEl.createDiv({
       cls: "yggdrasil-chat-messages",
@@ -100,7 +118,10 @@ export class ChatView extends ItemView {
       this.#showLoading();
 
       try {
-        const response = await this.rag.query(text);
+        const response = await this.rag.query(
+          text,
+          this.#messages.slice(0, -1),
+        );
         this.#messages.push({ content: response, role: "assistant" });
         this.#renderMessage(response, "assistant");
       } finally {
@@ -224,5 +245,12 @@ export class ChatView extends ItemView {
     }
 
     this.#messageListEl.scrollTop = this.#messageListEl.scrollHeight;
+  }
+
+  #clearConversation(): void {
+    this.#messages.length = 0;
+    if (this.#messageListEl !== null) {
+      this.#messageListEl.empty();
+    }
   }
 }

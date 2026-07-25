@@ -3,6 +3,7 @@ import { ChatOpenAI } from "@langchain/openai";
 import type { TFile, Vault } from "obsidian";
 import { deflate, inflate } from "pako";
 
+import type { ChatMessage } from "./adapters/agent";
 import { LangchainAgentAdapter } from "./adapters/agent";
 import { LangchainEmbeddingsAdapter } from "./adapters/embeddings";
 import { RetrieveToolAdapter } from "./adapters/retrieve-tool";
@@ -66,9 +67,12 @@ export class LangchainRag {
     this.#vectorStore.deleteDocumentsByPath(path);
   }
 
-  public async query(query: string): Promise<string> {
+  public async query(
+    query: string,
+    history: Array<ChatMessage>,
+  ): Promise<string> {
     console.log("Querying agent with messages:", query);
-    return this.#agent.invoke(query);
+    return this.#agent.invoke(query, history);
   }
 
   async #saveToDisk(): Promise<void> {
@@ -103,7 +107,7 @@ export class LangchainRag {
     } catch {
       throw new Error(
         `Failed to load vector store from ${this.#dbPath}. ` +
-        "The file may be missing or corrupted.",
+          "The file may be missing or corrupted.",
       );
     }
   }
@@ -132,7 +136,7 @@ export function createLangchainRag(
     model: "/model/Qwen3.6-mtp-35B-A3B-UD-Q4_K_XL.gguf",
     configuration: {
       // eslint-disable-next-line @typescript-eslint/naming-convention
-      baseURL: "http://127.0.0.1:9001/v1",
+      baseURL: "http://brain.mar3ek.home:9001/v1",
       apiKey: "-",
     },
   });

@@ -48,8 +48,16 @@ const AgentState = Annotation.Root({
 
 export type AgentStateType = typeof AgentState.State;
 
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
 export class LangchainAgentAdapter {
-  readonly #invoker: (input: string) => Promise<string>;
+  readonly #invoker: (
+    input: string,
+    history: Array<ChatMessage>,
+  ) => Promise<string>;
 
   public constructor(options: {
     model: ChatOpenAI;
@@ -57,14 +65,11 @@ export class LangchainAgentAdapter {
     systemPrompt: string;
   }) {
     const langchainTools = options.tools.map((vt) =>
-      tool(
-        async (params: Record<string, string>) => vt.execute(params),
-        {
-          name: vt.toolName,
-          description: vt.toolDescription,
-          schema: z.object(vt.zodSchema),
-        },
-      ),
+      tool(async (params: Record<string, string>) => vt.execute(params), {
+        name: vt.toolName,
+        description: vt.toolDescription,
+        schema: z.object(vt.zodSchema),
+      }),
     );
 
     // Main LLM bound to tools for agent loop
@@ -155,12 +160,12 @@ export class LangchainAgentAdapter {
       const evaluationPrompt = [
         new SystemMessage(
           "You are an evaluator for a D&D campaign notes assistant. " +
-          "Assess the quality of the AI's last response with these criteria:\n" +
-          "- Does it answer the user's question about campaign lore, NPCs, locations, or session history?\n" +
-          "- Is it accurate and consistent with the retrieved notes? (Check for hallucinations or contradictions)\n" +
-          "- Is it sufficiently detailed and helpful for a DM or player?\n" +
-          "- Does it avoid vague, generic, or incomplete answers?\n" +
-          "Return a JSON object with 'quality' (good/poor) and 'reason' (brief explanation).",
+            "Assess the quality of the AI's last response with these criteria:\n" +
+            "- Does it answer the user's question about campaign lore, NPCs, locations, or session history?\n" +
+            "- Is it accurate and consistent with the retrieved notes? (Check for hallucinations or contradictions)\n" +
+            "- Is it sufficiently detailed and helpful for a DM or player?\n" +
+            "- Does it avoid vague, generic, or incomplete answers?\n" +
+            "Return a JSON object with 'quality' (good/poor) and 'reason' (brief explanation).",
         ),
         new HumanMessage(
           `User query: ${extractText(state.messages[0]?.content) ?? "N/A"}\n\nAI response: ${answerText}`,
@@ -269,15 +274,26 @@ export class LangchainAgentAdapter {
     const compiledGraph = graph.compile();
 
     // Compile the graph
-    this.#invoker = async (input: string): Promise<string> =>
-      (
+    this.#invoker = async (
+      input: string,
+      history: Array<ChatMessage>,
+    ): Promise<string> => {
+      const historyMessages: Array<HumanMessage | AIMessage> = history.map(
+        (entry) =>
+          entry.role === "user"
+            ? new HumanMessage(entry.content)
+            : new AIMessage(entry.content),
+      );
+
+      return (
         await compiledGraph.invoke({
-          messages: [new HumanMessage(input)],
+          messages: [...historyMessages, new HumanMessage(input)],
         })
       ).finalAnswer;
+    };
   }
 
-  public invoke(input: string): Promise<string> {
-    return this.#invoker(input);
+  public invoke(input: string, history: Array<ChatMessage>): Promise<string> {
+    return this.#invoker(input, history);
   }
 }

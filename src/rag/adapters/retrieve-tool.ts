@@ -27,9 +27,7 @@ export class RetrieveToolAdapter implements IVaultTool {
     const query = params.query;
     const retrievedDocs = await this.#vectorStore.similaritySearch(query, 5);
     const serialized = retrievedDocs
-      .map(
-        (doc) => `Source: ${doc.metadata.source}\nContent: ${doc.pageContent}`,
-      )
+      .map((doc) => `Source: ${doc.metadata.path}\nContent: ${doc.pageContent}`)
       .join("\n");
 
     return serialized;
