@@ -246,6 +246,17 @@
   padding: 6px 12px;
 }
 
+/* ── Cancel Button ───────────────────────────────────────────────────────────── */
+
+.yggdrasil-chat-cancel-btn {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.yggdrasil-chat-cancel-btn:hover {
+  background-color: var(--interactive-hover);
+}
+
 /* ── Loading Indicator ───────────────────────────────────────────────────────── */
 
 .yggdrasil-chat-loading-content {

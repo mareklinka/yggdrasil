@@ -70,9 +70,10 @@ export class LangchainRag {
   public async query(
     query: string,
     history: Array<ChatMessage>,
+    signal?: AbortSignal,
   ): Promise<string> {
     console.log("Querying agent with messages:", query);
-    return this.#agent.invoke(query, history);
+    return this.#agent.invoke(query, history, signal);
   }
 
   async #saveToDisk(): Promise<void> {

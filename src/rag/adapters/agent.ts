@@ -58,6 +58,7 @@ export class LangchainAgentAdapter {
   readonly #invoker: (
     input: string,
     history: Array<ChatMessage>,
+    signal?: AbortSignal,
   ) => Promise<string>;
 
   public constructor(options: {
@@ -270,7 +271,12 @@ export class LangchainAgentAdapter {
     this.#invoker = async (
       input: string,
       history: Array<ChatMessage>,
+      signal?: AbortSignal,
     ): Promise<string> => {
+      if (signal?.aborted) {
+        throw new DOMException("Aborted", "AbortError");
+      }
+
       const historyMessages: Array<HumanMessage | AIMessage> = history.map(
         (entry) =>
           entry.role === "user"
@@ -278,15 +284,31 @@ export class LangchainAgentAdapter {
             : new AIMessage(entry.content),
       );
 
-      return (
-        await compiledGraph.invoke({
-          messages: [...historyMessages, new HumanMessage(input)],
-        })
-      ).finalAnswer;
+      const stream = await compiledGraph.stream(
+        { messages: [...historyMessages, new HumanMessage(input)] },
+        { signal },
+      );
+
+      let finalAnswer = "";
+      for await (const update of stream) {
+        if (signal?.aborted) {
+          throw new DOMException("Aborted", "AbortError");
+        }
+        const evaluatorUpdate = update.evaluator as
+          typeof AgentState.State | undefined;
+        if (evaluatorUpdate?.finalAnswer) {
+          finalAnswer = evaluatorUpdate.finalAnswer;
+        }
+      }
+      return finalAnswer;
     };
   }
 
-  public invoke(input: string, history: Array<ChatMessage>): Promise<string> {
-    return this.#invoker(input, history);
+  public invoke(
+    input: string,
+    history: Array<ChatMessage>,
+    signal?: AbortSignal,
+  ): Promise<string> {
+    return this.#invoker(input, history, signal);
   }
 }

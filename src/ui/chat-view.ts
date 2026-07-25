@@ -8,6 +8,8 @@ export const CHAT_VIEW_TYPE = "yggdrasil-chat";
 export class ChatView extends ItemView {
   #messageListEl: HTMLElement | null = null;
   #loadingWrapperEl: HTMLElement | null = null;
+  #abortController: AbortController | null = null;
+  #sendBtn: HTMLButtonElement | null = null;
 
   public constructor(
     leaf: WorkspaceLeaf,
@@ -67,10 +69,11 @@ export class ChatView extends ItemView {
     });
     input.rows = 1;
 
-    const sendBtn: HTMLElement = inputRow.createEl("button", {
+    const sendBtn: HTMLButtonElement = inputRow.createEl("button", {
       text: "Send",
       cls: "mod-cta",
     });
+    this.#sendBtn = sendBtn;
 
     // Auto-resize textarea height on input
     input.addEventListener("input", (): void => {
@@ -95,14 +98,30 @@ export class ChatView extends ItemView {
   }
 
   public async onClose(): Promise<void> {
+    if (this.#abortController !== null) {
+      this.#abortController.abort();
+      this.#abortController = null;
+    }
     this.#messageListEl = null;
     this.#loadingWrapperEl = null;
+    this.#sendBtn = null;
   }
 
   readonly #messages: Array<{ content: string; role: "user" | "assistant" }> =
     [];
 
   async #onSend(inputEl: HTMLTextAreaElement): Promise<void> {
+    if (this.#abortController !== null) {
+      this.#abortController.abort();
+      this.#abortController = null;
+      this.#setLoadingState(false);
+      this.#hideLoading();
+      this.#messages.pop();
+      inputEl.disabled = false;
+      inputEl.focus();
+      return;
+    }
+
     const text: string = inputEl.value.trim();
     if (text.length === 0) {
       return;
@@ -110,35 +129,54 @@ export class ChatView extends ItemView {
 
     this.#messages.push({ content: text, role: "user" });
 
-    // Disable input while rendering canned response
     inputEl.disabled = true;
     try {
-      // Append user bubble
       this.#renderMessage(text, "user");
 
-      // Clear input and reset height
       inputEl.value = "";
       inputEl.style.height = "auto";
 
-      // Show loading indicator
       this.#showLoading();
+      this.#setLoadingState(true);
 
+      this.#abortController = new AbortController();
       try {
         const response = await this.rag.query(
           text,
           this.#messages.slice(0, -1),
+          this.#abortController.signal,
         );
         this.#messages.push({ content: response, role: "assistant" });
         this.#renderMessage(response, "assistant");
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          this.#messages.pop();
+          this.#renderMessage("Request cancelled.", "assistant");
+        } else {
+          throw error;
+        }
       } finally {
-        // Remove loading indicator regardless of outcome
-        this.#hideLoading();
+        this.#abortController = null;
       }
     } finally {
-      // Re-enable input regardless of outcome
+      this.#setLoadingState(false);
+      this.#hideLoading();
       inputEl.disabled = false;
-      // Retain focus for quick follow-up messages
       inputEl.focus();
+    }
+  }
+
+  #setLoadingState(isLoading: boolean): void {
+    if (this.#sendBtn === null) {
+      return;
+    }
+
+    if (isLoading) {
+      this.#sendBtn.textContent = "Cancel";
+      this.#sendBtn.classList.add("yggdrasil-chat-cancel-btn");
+    } else {
+      this.#sendBtn.textContent = "Send";
+      this.#sendBtn.classList.remove("yggdrasil-chat-cancel-btn");
     }
   }
 
@@ -268,6 +306,10 @@ export class ChatView extends ItemView {
   }
 
   #clearConversation(): void {
+    if (this.#abortController !== null) {
+      this.#abortController.abort();
+      this.#abortController = null;
+    }
     this.#messages.length = 0;
     if (this.#messageListEl !== null) {
       this.#messageListEl.empty();

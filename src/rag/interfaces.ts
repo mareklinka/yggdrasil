@@ -25,6 +25,7 @@ export interface IAgent {
   invoke(
     query: string,
     history: Array<{ role: "user" | "assistant"; content: string }>,
+    signal?: AbortSignal,
   ): Promise<string>;
 }
 
