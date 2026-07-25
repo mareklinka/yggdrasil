@@ -12,6 +12,7 @@ import type { ChatOpenAI } from "@langchain/openai";
 import { z } from "zod";
 
 import type { IVaultTool } from "../interfaces";
+import { evaluatorPrompt } from "../prompts";
 
 const retrieverNode = "retriever";
 const evaluatorNode = "evaluator";
@@ -158,15 +159,7 @@ export class LangchainAgentAdapter {
 
       // Use LLM to evaluate answer quality
       const evaluationPrompt = [
-        new SystemMessage(
-          "You are an evaluator for a D&D campaign notes assistant. " +
-            "Assess the quality of the AI's last response with these criteria:\n" +
-            "- Does it answer the user's question about campaign lore, NPCs, locations, or session history?\n" +
-            "- Is it accurate and consistent with the retrieved notes? (Check for hallucinations or contradictions)\n" +
-            "- Is it sufficiently detailed and helpful for a DM or player?\n" +
-            "- Does it avoid vague, generic, or incomplete answers?\n" +
-            "Return a JSON object with 'quality' (good/poor) and 'reason' (brief explanation).",
-        ),
+        new SystemMessage(evaluatorPrompt),
         new HumanMessage(
           `User query: ${extractText(state.messages[0]?.content) ?? "N/A"}\n\nAI response: ${answerText}`,
         ),

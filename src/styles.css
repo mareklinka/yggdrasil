@@ -163,6 +163,27 @@
   user-select: text;
 }
 
+/* ── Source Links (wiki-links rendered by MarkdownRenderer) ──────────────────── */
+
+.yggdrasil-chat-bubble--assistant a.internal-trigger {
+  display: inline-block;
+  margin: 2px 4px 2px 0;
+  padding: 1px 8px;
+  color: var(--text-accent);
+  background-color: var(--background-modifier-hover);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  text-decoration: none;
+  font-size: 0.85em;
+  font-family: var(--font-monospace);
+  cursor: pointer;
+}
+
+.yggdrasil-chat-bubble--assistant a.internal-trigger:hover {
+  background-color: var(--background-modifier-border);
+  color: var(--text-accent-hover);
+}
+
 /* ── Input Row ───────────────────────────────────────────────────────────────── */
 
 .yggdrasil-chat-input-row {

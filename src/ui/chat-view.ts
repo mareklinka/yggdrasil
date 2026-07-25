@@ -229,6 +229,17 @@ export class ChatView extends ItemView {
 
     if (sender === "assistant") {
       MarkdownRenderer.render(this.app, text, bubble, "", this);
+
+      // Make wiki-links clickable in chat context
+      bubble
+        .querySelectorAll<HTMLAnchorElement>("a.internal-link")
+        .forEach((link) => {
+          const path = link.getAttribute("href") || "";
+          link.addEventListener("click", (evt: MouseEvent): void => {
+            evt.preventDefault();
+            this.app.workspace.openLinkText(path, "");
+          });
+        });
     } else {
       bubble.createEl("div", {
         cls: "yggdrasil-chat-bubble-content",
