@@ -61,15 +61,21 @@ export class ChatView extends ItemView {
       cls: "yggdrasil-chat-input-row",
     });
 
-    const input: HTMLInputElement = inputRow.createEl("input", {
-      type: "text",
+    const input: HTMLTextAreaElement = inputRow.createEl("textarea", {
       cls: "yggdrasil-chat-input",
       placeholder: "Type a message…",
     });
+    input.rows = 1;
 
     const sendBtn: HTMLElement = inputRow.createEl("button", {
       text: "Send",
       cls: "mod-cta",
+    });
+
+    // Auto-resize textarea height on input
+    input.addEventListener("input", (): void => {
+      input.style.height = "auto";
+      input.style.height = `${input.scrollHeight}px`;
     });
 
     input.addEventListener("keydown", (evt: KeyboardEvent): void => {
@@ -83,7 +89,6 @@ export class ChatView extends ItemView {
       this.#onSend(input);
     });
 
-    // Focus input when pane first opens — defer until after render
     setTimeout(() => {
       input.focus();
     }, 0);
@@ -97,7 +102,7 @@ export class ChatView extends ItemView {
   readonly #messages: Array<{ content: string; role: "user" | "assistant" }> =
     [];
 
-  async #onSend(inputEl: HTMLInputElement): Promise<void> {
+  async #onSend(inputEl: HTMLTextAreaElement): Promise<void> {
     const text: string = inputEl.value.trim();
     if (text.length === 0) {
       return;
@@ -111,8 +116,9 @@ export class ChatView extends ItemView {
       // Append user bubble
       this.#renderMessage(text, "user");
 
-      // Clear input
+      // Clear input and reset height
       inputEl.value = "";
+      inputEl.style.height = "auto";
 
       // Show loading indicator
       this.#showLoading();
@@ -180,57 +186,22 @@ export class ChatView extends ItemView {
       return;
     }
 
-    // Wrapper row: [copy button] [bubble content]
     const wrapper: HTMLElement = this.#messageListEl.createDiv({
       cls: `yggdrasil-chat-row yggdrasil-chat-row--${sender}`,
     });
 
-    // Copy button — hidden by default, shown on hover
-    const copyBtn: HTMLButtonElement = wrapper.createEl("button", {
-      cls: "yggdrasil-chat-copy-btn",
-      attr: { title: "Copy message" },
+    // Column container holds bubble + footer, aligned by the row wrapper
+    const col: HTMLElement = wrapper.createDiv({
+      cls: "yggdrasil-chat-col",
     });
-    copyBtn.textContent = "\u2398"; // ⌘ symbol as copy icon
 
-    // The actual message bubble
-    const bubble: HTMLElement = wrapper.createDiv({
+    const bubble: HTMLElement = col.createDiv({
       cls: `yggdrasil-chat-bubble yggdrasil-chat-bubble--${sender}`,
-    });
-
-    // Show/hide copy button on hover
-    wrapper.addEventListener("mouseenter", (): void => {
-      copyBtn.style.opacity = "1";
-    });
-    wrapper.addEventListener("mouseleave", (): void => {
-      copyBtn.style.opacity = "0";
-    });
-
-    // Copy on click
-    copyBtn.addEventListener("click", (evt: MouseEvent): void => {
-      evt.stopPropagation();
-      const clipboard = navigator.clipboard;
-      if (clipboard === undefined) {
-        return;
-      }
-
-      clipboard
-        .writeText(text)
-        .then(() => {
-          // Brief visual feedback
-          copyBtn.textContent = "\u2713"; // ✓ checkmark
-          setTimeout(() => {
-            copyBtn.textContent = "\u2398";
-          }, 1000);
-        })
-        .catch((): void => {
-          // Clipboard write failed silently — non-critical UX feature
-        });
     });
 
     if (sender === "assistant") {
       MarkdownRenderer.render(this.app, text, bubble, "", this);
 
-      // Make wiki-links clickable in chat context
       bubble
         .querySelectorAll<HTMLAnchorElement>("a.internal-link")
         .forEach((link) => {
@@ -246,6 +217,44 @@ export class ChatView extends ItemView {
         text,
       });
     }
+
+    // Footer bar with copy button — below bubble, inside same column
+    const footer: HTMLElement = col.createDiv({
+      cls: "yggdrasil-chat-bubble-footer",
+    });
+
+    const copyBtn: HTMLButtonElement = footer.createEl("button", {
+      cls: "yggdrasil-chat-copy-btn",
+    });
+    copyBtn.innerHTML = "\u2398 Copy message";
+
+    // Hover on the column so cursor can move from bubble to footer without hiding
+    col.addEventListener("mouseenter", (): void => {
+      footer.style.opacity = "1";
+    });
+    col.addEventListener("mouseleave", (): void => {
+      footer.style.opacity = "0";
+    });
+
+    copyBtn.addEventListener("click", (evt: MouseEvent): void => {
+      evt.stopPropagation();
+      const clipboard = navigator.clipboard;
+      if (clipboard === undefined) {
+        return;
+      }
+
+      clipboard
+        .writeText(text)
+        .then(() => {
+          copyBtn.innerHTML = "\u2713 Copied";
+          setTimeout(() => {
+            copyBtn.innerHTML = "\u2398 Copy message";
+          }, 1000);
+        })
+        .catch((): void => {
+          // Clipboard write failed silently
+        });
+    });
 
     this.#scrollToBottom();
   }
