@@ -15,7 +15,7 @@ export class ChatView extends ItemView {
 
   public constructor(
     leaf: WorkspaceLeaf,
-    private readonly rag: LangchainRag,
+    private readonly getRag: () => LangchainRag,
   ) {
     super(leaf);
     this.#messageHistory = new MessageHistory();
@@ -169,7 +169,7 @@ export class ChatView extends ItemView {
 
       this.#abortController = new AbortController();
       try {
-        const response = await this.rag.query(
+        const response = await this.getRag().query(
           text,
           this.#messages.slice(0, -1),
           this.#abortController.signal,
@@ -177,11 +177,11 @@ export class ChatView extends ItemView {
         this.#messages.push({ content: response, role: "assistant" });
         this.#renderMessage(response, "assistant");
       } catch (error) {
+        this.#messages.pop();
         if (error instanceof DOMException && error.name === "AbortError") {
-          this.#messages.pop();
           this.#renderMessage("Request cancelled.", "assistant");
         } else {
-          throw error;
+          this.#renderMessage(`Request error: ${error}`, "assistant");
         }
       } finally {
         this.#abortController = null;

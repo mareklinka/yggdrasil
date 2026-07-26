@@ -11,7 +11,7 @@ import { ToolNode } from "@langchain/langgraph/prebuilt";
 import type { ChatOpenAI } from "@langchain/openai";
 import { z } from "zod";
 
-import type { IVaultTool } from "../interfaces";
+import type { IAgent, IVaultTool } from "../interfaces";
 import { evaluatorPrompt } from "../prompts";
 
 const retrieverNode = "retriever";
@@ -54,7 +54,7 @@ export interface ChatMessage {
   content: string;
 }
 
-export class LangchainAgentAdapter {
+export class LangchainAgentAdapter implements IAgent {
   readonly #invoker: (
     input: string,
     history: Array<ChatMessage>,

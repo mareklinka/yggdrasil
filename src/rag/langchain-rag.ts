@@ -134,7 +134,7 @@ export function createLangchainRag(
   vault: Vault,
   settings: YggdrasilSettings,
   dbPath: string,
-  embeddingErrorHandler: (e: unknown) => void
+  embeddingErrorHandler: (e: unknown) => void,
 ): LangchainRag {
   const splitter = new LangchainSplitterAdapter(
     settings.splitterChunkSize,
@@ -146,13 +146,16 @@ export function createLangchainRag(
     baseUrl: settings.embeddingsBaseUrl,
     dimensions: settings.embeddingsDimensions,
     apiKey: settings.embeddingsApiKey,
-    errorHandler: embeddingErrorHandler
+    errorHandler: embeddingErrorHandler,
   });
 
   const vectorStore = new LangchainVectorStoreAdapter(embeddings);
 
   const rawChatModel = new ChatOpenAI({
     model: settings.chatModelPath,
+    onFailedAttempt: (e): never => {
+      throw e;
+    },
     configuration: {
       // eslint-disable-next-line @typescript-eslint/naming-convention
       baseURL: settings.chatModelBaseUrl,

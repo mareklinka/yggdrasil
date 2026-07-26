@@ -42,7 +42,7 @@ export default class YggdrasilPlugin extends Plugin {
     // Register chat view
     this.registerView(
       CHAT_VIEW_TYPE,
-      (leaf: WorkspaceLeaf) => new ChatView(leaf, this.#rag),
+      (leaf: WorkspaceLeaf) => new ChatView(leaf, () => this.#rag),
     );
 
     const openChat = (): void => {
@@ -109,7 +109,7 @@ export default class YggdrasilPlugin extends Plugin {
       try {
         await this.#rag.clear();
         await this.#rag.index(...this.app.vault.getMarkdownFiles());
-        new Notice('Re-indexing complete')
+        new Notice("Re-indexing complete");
       } catch (error) {
         const message: string =
           error instanceof Error ? error.message : "Unknown error";
