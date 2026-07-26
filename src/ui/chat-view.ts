@@ -2,6 +2,7 @@ import type { WorkspaceLeaf } from "obsidian";
 import { ItemView, MarkdownRenderer } from "obsidian";
 
 import type { LangchainRag } from "../rag/langchain-rag";
+import { MessageHistory } from "./message-history";
 
 export const CHAT_VIEW_TYPE = "yggdrasil-chat";
 
@@ -10,12 +11,14 @@ export class ChatView extends ItemView {
   #loadingWrapperEl: HTMLElement | null = null;
   #abortController: AbortController | null = null;
   #sendBtn: HTMLButtonElement | null = null;
+  readonly #messageHistory: MessageHistory;
 
   public constructor(
     leaf: WorkspaceLeaf,
     private readonly rag: LangchainRag,
   ) {
     super(leaf);
+    this.#messageHistory = new MessageHistory();
   }
 
   public getViewType(): string {
@@ -85,6 +88,30 @@ export class ChatView extends ItemView {
       if (evt.key === "Enter" && !evt.shiftKey) {
         evt.preventDefault();
         this.#onSend(input);
+        return;
+      }
+
+      if (input.disabled) {
+        return;
+      }
+
+      if (evt.key === "ArrowUp") {
+        evt.preventDefault();
+        if (this.#messageHistory.atDefaultPosition) {
+          this.#messageHistory.setDraft(input.value);
+        }
+        input.value = this.#messageHistory.previous();
+        input.selectionStart = input.value.length;
+        input.selectionEnd = input.selectionStart;
+        return;
+      }
+
+      if (evt.key === "ArrowDown") {
+        evt.preventDefault();
+        input.value = this.#messageHistory.next();
+        input.selectionStart = input.value.length;
+        input.selectionEnd = input.selectionStart;
+        return;
       }
     });
 
@@ -128,6 +155,7 @@ export class ChatView extends ItemView {
     }
 
     this.#messages.push({ content: text, role: "user" });
+    this.#messageHistory.push(text);
 
     inputEl.disabled = true;
     try {
@@ -311,6 +339,7 @@ export class ChatView extends ItemView {
       this.#abortController = null;
     }
     this.#messages.length = 0;
+    this.#messageHistory.clear();
     if (this.#messageListEl !== null) {
       this.#messageListEl.empty();
     }
