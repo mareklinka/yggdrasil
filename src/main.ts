@@ -42,7 +42,12 @@ export default class YggdrasilPlugin extends Plugin {
     // Register chat view
     this.registerView(
       CHAT_VIEW_TYPE,
-      (leaf: WorkspaceLeaf) => new ChatView(leaf, () => this.#rag),
+      (leaf: WorkspaceLeaf) =>
+        new ChatView(
+          leaf,
+          () => this.#rag,
+          () => this.#data,
+        ),
     );
 
     const openChat = (): void => {

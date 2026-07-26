@@ -11,7 +11,7 @@ import { ToolNode } from "@langchain/langgraph/prebuilt";
 import type { ChatOpenAI } from "@langchain/openai";
 import { z } from "zod";
 
-import type { IAgent, IVaultTool } from "../interfaces";
+import type { ChatMessage, IAgent, IVaultTool } from "../interfaces";
 import { evaluatorPrompt } from "../prompts";
 
 const retrieverNode = "retriever";
@@ -49,14 +49,9 @@ const AgentState = Annotation.Root({
 
 export type AgentStateType = typeof AgentState.State;
 
-export interface ChatMessage {
-  role: "user" | "assistant";
-  content: string;
-}
-
 export class LangchainAgentAdapter implements IAgent {
   readonly #invoker: (
-    input: string,
+    query: ChatMessage,
     history: Array<ChatMessage>,
     signal?: AbortSignal,
   ) => Promise<string>;
@@ -269,7 +264,7 @@ export class LangchainAgentAdapter implements IAgent {
 
     // Compile the graph
     this.#invoker = async (
-      input: string,
+      query: ChatMessage,
       history: Array<ChatMessage>,
       signal?: AbortSignal,
     ): Promise<string> => {
@@ -277,15 +272,31 @@ export class LangchainAgentAdapter implements IAgent {
         throw new DOMException("Aborted", "AbortError");
       }
 
-      const historyMessages: Array<HumanMessage | AIMessage> = history.map(
-        (entry) =>
-          entry.role === "user"
-            ? new HumanMessage(entry.content)
-            : new AIMessage(entry.content),
-      );
+      const toLangchainMessage = (
+        entry: ChatMessage,
+      ): HumanMessage | AIMessage => {
+        if (entry.role === "assistant") {
+          return new AIMessage(entry.content);
+        }
+        if (entry.attachments !== undefined && entry.attachments.length > 0) {
+          const content: Array<ContentBlock> = [
+            { type: "text", text: entry.content },
+            ...entry.attachments.map((a) => ({
+              type: "image_url" as const,
+              // eslint-disable-next-line @typescript-eslint/naming-convention
+              image_url: { url: a.dataUrl },
+            })),
+          ];
+          return new HumanMessage(content);
+        }
+        return new HumanMessage(entry.content);
+      };
+
+      const historyMessages: Array<HumanMessage | AIMessage> =
+        history.map(toLangchainMessage);
 
       const stream = await compiledGraph.stream(
-        { messages: [...historyMessages, new HumanMessage(input)] },
+        { messages: [...historyMessages, toLangchainMessage(query)] },
         { signal },
       );
 
@@ -305,10 +316,10 @@ export class LangchainAgentAdapter implements IAgent {
   }
 
   public invoke(
-    input: string,
+    query: ChatMessage,
     history: Array<ChatMessage>,
     signal?: AbortSignal,
   ): Promise<string> {
-    return this.#invoker(input, history, signal);
+    return this.#invoker(query, history, signal);
   }
 }

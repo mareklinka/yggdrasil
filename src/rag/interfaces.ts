@@ -20,11 +20,24 @@ export interface IVectorStore {
   getVectors(): Array<unknown>;
 }
 
+/** An image attachment encoded as a base64 data URL. */
+export interface ChatAttachment {
+  dataUrl: string;
+  mimeType: string;
+}
+
+/** A chat message that may include image attachments. */
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+  attachments?: Array<ChatAttachment>;
+}
+
 /** Runs an agent with tools and system prompt. */
 export interface IAgent {
   invoke(
-    query: string,
-    history: Array<{ role: "user" | "assistant"; content: string }>,
+    query: ChatMessage,
+    history: Array<ChatMessage>,
     signal?: AbortSignal,
   ): Promise<string>;
 }

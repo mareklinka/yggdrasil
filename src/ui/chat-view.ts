@@ -1,8 +1,13 @@
 import type { WorkspaceLeaf } from "obsidian";
-import { ItemView, MarkdownRenderer } from "obsidian";
+import { ItemView, MarkdownRenderer, Notice } from "obsidian";
 
+import type { ChatAttachment, ChatMessage } from "../rag/interfaces";
 import type { LangchainRag } from "../rag/langchain-rag";
+import type { YggdrasilSettings } from "../settings";
 import { MessageHistory } from "./message-history";
+
+const MAX_ATTACHMENT_SIZE = 1 * 1024 * 1024;
+const MAX_ATTACHMENTS = 3;
 
 export const CHAT_VIEW_TYPE = "yggdrasil-chat";
 
@@ -11,11 +16,14 @@ export class ChatView extends ItemView {
   #loadingWrapperEl: HTMLElement | null = null;
   #abortController: AbortController | null = null;
   #sendBtn: HTMLButtonElement | null = null;
+  #attachmentTrayEl: HTMLElement | null = null;
+  #pendingAttachments: Array<ChatAttachment> = [];
   readonly #messageHistory: MessageHistory;
 
   public constructor(
     leaf: WorkspaceLeaf,
     private readonly getRag: () => LangchainRag,
+    private readonly getSettings: () => YggdrasilSettings,
   ) {
     super(leaf);
     this.#messageHistory = new MessageHistory();
@@ -61,6 +69,12 @@ export class ChatView extends ItemView {
     });
     this.#messageListEl = listEl;
 
+    // Attachment tray
+    const trayEl: HTMLElement = contentEl.createDiv({
+      cls: "yggdrasil-chat-attachment-tray",
+    });
+    this.#attachmentTrayEl = trayEl;
+
     // Input row at bottom
     const inputRow: HTMLElement = contentEl.createDiv({
       cls: "yggdrasil-chat-input-row",
@@ -84,6 +98,66 @@ export class ChatView extends ItemView {
       input.style.height = `${input.scrollHeight}px`;
     });
 
+    // Paste handler for images
+    input.addEventListener("paste", (evt: ClipboardEvent): void => {
+      if (!this.getSettings().chatModelHasVision) {
+        return;
+      }
+      const items = evt.clipboardData?.items;
+      if (items === null || items === undefined) {
+        return;
+      }
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (!item.type.startsWith("image/")) {
+          continue;
+        }
+        evt.preventDefault();
+        const file = item.getAsFile();
+        if (file === null) {
+          continue;
+        }
+        this.#addFile(file);
+      }
+    });
+
+    // Drag-and-drop handlers
+    inputRow.addEventListener("dragover", (evt: DragEvent): void => {
+      if (!this.getSettings().chatModelHasVision) {
+        return;
+      }
+      evt.preventDefault();
+      inputRow.addClass("yggdrasil-chat-input-row--drag-over");
+    });
+
+    inputRow.addEventListener("dragleave", (evt: DragEvent): void => {
+      if (
+        evt.relatedTarget !== null &&
+        inputRow.contains(evt.relatedTarget as Node)
+      ) {
+        return;
+      }
+      inputRow.removeClass("yggdrasil-chat-input-row--drag-over");
+    });
+
+    inputRow.addEventListener("drop", (evt: DragEvent): void => {
+      if (!this.getSettings().chatModelHasVision) {
+        return;
+      }
+      evt.preventDefault();
+      inputRow.removeClass("yggdrasil-chat-input-row--drag-over");
+      const files = evt.dataTransfer?.files;
+      if (files === null || files === undefined) {
+        return;
+      }
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        if (file.type.startsWith("image/")) {
+          this.#addFile(file);
+        }
+      }
+    });
+
     input.addEventListener("keydown", (evt: KeyboardEvent): void => {
       if (evt.key === "Enter" && !evt.shiftKey) {
         evt.preventDefault();
@@ -95,20 +169,28 @@ export class ChatView extends ItemView {
         return;
       }
 
-      if (evt.key === "ArrowUp") {
+      if (evt.key === "ArrowUp" && this.#messageHistory.size > 0) {
         evt.preventDefault();
         if (this.#messageHistory.atDefaultPosition) {
           this.#messageHistory.setDraft(input.value);
         }
-        input.value = this.#messageHistory.previous();
+        const entry = this.#messageHistory.previous();
+        if (entry !== undefined) {
+          input.value = entry.content;
+          this.#pendingAttachments =
+            entry.attachments !== undefined ? [...entry.attachments] : [];
+          this.#renderAttachmentTray();
+        }
         input.selectionStart = input.value.length;
         input.selectionEnd = input.selectionStart;
         return;
       }
 
-      if (evt.key === "ArrowDown") {
+      if (evt.key === "ArrowDown" && this.#messageHistory.size > 0) {
         evt.preventDefault();
         input.value = this.#messageHistory.next();
+        this.#pendingAttachments = [];
+        this.#renderAttachmentTray();
         input.selectionStart = input.value.length;
         input.selectionEnd = input.selectionStart;
         return;
@@ -132,10 +214,10 @@ export class ChatView extends ItemView {
     this.#messageListEl = null;
     this.#loadingWrapperEl = null;
     this.#sendBtn = null;
+    this.#attachmentTrayEl = null;
   }
 
-  readonly #messages: Array<{ content: string; role: "user" | "assistant" }> =
-    [];
+  readonly #messages: Array<ChatMessage> = [];
 
   async #onSend(inputEl: HTMLTextAreaElement): Promise<void> {
     if (this.#abortController !== null) {
@@ -150,19 +232,35 @@ export class ChatView extends ItemView {
     }
 
     const text: string = inputEl.value.trim();
-    if (text.length === 0) {
+    if (text.length === 0 && this.#pendingAttachments.length === 0) {
       return;
     }
 
-    this.#messages.push({ content: text, role: "user" });
-    this.#messageHistory.push(text);
+    const attachments =
+      this.#pendingAttachments.length > 0
+        ? [...this.#pendingAttachments]
+        : undefined;
+
+    this.#messages.push({
+      content: text,
+      role: "user",
+      attachments: attachments,
+    });
+
+    this.#messageHistory.push({
+      content: text,
+      role: "user",
+      attachments: attachments,
+    });
 
     inputEl.disabled = true;
     try {
-      this.#renderMessage(text, "user");
+      this.#renderMessage(text, "user", attachments);
 
       inputEl.value = "";
       inputEl.style.height = "auto";
+      this.#pendingAttachments = [];
+      this.#renderAttachmentTray();
 
       this.#showLoading();
       this.#setLoadingState(true);
@@ -171,6 +269,7 @@ export class ChatView extends ItemView {
       try {
         const response = await this.getRag().query(
           text,
+          attachments,
           this.#messages.slice(0, -1),
           this.#abortController.signal,
         );
@@ -247,7 +346,11 @@ export class ChatView extends ItemView {
     }
   }
 
-  #renderMessage(text: string, sender: "user" | "assistant"): void {
+  #renderMessage(
+    text: string,
+    sender: "user" | "assistant",
+    attachments?: Array<ChatAttachment>,
+  ): void {
     if (this.#messageListEl === null) {
       return;
     }
@@ -278,10 +381,26 @@ export class ChatView extends ItemView {
           });
         });
     } else {
-      bubble.createEl("div", {
-        cls: "yggdrasil-chat-bubble-content",
-        text,
-      });
+      if (attachments !== undefined && attachments.length > 0) {
+        const imageContainer: HTMLElement = bubble.createDiv({
+          cls: "yggdrasil-chat-bubble-images",
+        });
+        for (let i = 0; i < attachments.length; i++) {
+          imageContainer.createEl("img", {
+            cls: "yggdrasil-chat-bubble-image",
+            attr: {
+              src: attachments[i].dataUrl,
+              alt: "Attached image",
+            },
+          });
+        }
+      }
+      if (text.length > 0) {
+        bubble.createEl("div", {
+          cls: "yggdrasil-chat-bubble-content",
+          text,
+        });
+      }
     }
 
     // Footer bar with copy button — below bubble, inside same column
@@ -333,15 +452,82 @@ export class ChatView extends ItemView {
     this.#messageListEl.scrollTop = this.#messageListEl.scrollHeight;
   }
 
+  #addFile(file: File): void {
+    if (!this.getSettings().chatModelHasVision) {
+      return;
+    }
+    if (this.#pendingAttachments.length >= MAX_ATTACHMENTS) {
+      new Notice(`Maximum ${MAX_ATTACHMENTS} attachments allowed`);
+      return;
+    }
+    if (file.size > MAX_ATTACHMENT_SIZE) {
+      new Notice("Image must be under 1 MB");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (): void => {
+      const result = reader.result;
+      if (typeof result !== "string") {
+        return;
+      }
+      this.#pendingAttachments.push({
+        dataUrl: result,
+        mimeType: file.type,
+      });
+      this.#renderAttachmentTray();
+    };
+    reader.onerror = (): void => {
+      new Notice("Failed to read image");
+    };
+    reader.readAsDataURL(file);
+  }
+
+  #renderAttachmentTray(): void {
+    if (this.#attachmentTrayEl === null) {
+      return;
+    }
+    if (!this.getSettings().chatModelHasVision) {
+      this.#attachmentTrayEl.empty();
+      this.#attachmentTrayEl.style.display = "none";
+      this.#pendingAttachments = [];
+      return;
+    }
+    this.#attachmentTrayEl.style.display = "";
+    this.#attachmentTrayEl.empty();
+    for (let i = 0; i < this.#pendingAttachments.length; i++) {
+      const idx = i;
+      const item: HTMLElement = this.#attachmentTrayEl.createDiv({
+        cls: "yggdrasil-chat-attachment-item",
+      });
+      item.createEl("img", {
+        cls: "yggdrasil-chat-attachment-thumb",
+        attr: {
+          src: this.#pendingAttachments[idx].dataUrl,
+          alt: "Attached image",
+        },
+      });
+      const removeBtn: HTMLButtonElement = item.createEl("button", {
+        cls: "yggdrasil-chat-attachment-remove",
+        text: "✕",
+      });
+      removeBtn.addEventListener("click", (): void => {
+        this.#pendingAttachments.splice(idx, 1);
+        this.#renderAttachmentTray();
+      });
+    }
+  }
+
   #clearConversation(): void {
     if (this.#abortController !== null) {
       this.#abortController.abort();
       this.#abortController = null;
     }
     this.#messages.length = 0;
+    this.#pendingAttachments = [];
     this.#messageHistory.clear();
     if (this.#messageListEl !== null) {
       this.#messageListEl.empty();
     }
+    this.#renderAttachmentTray();
   }
 }

@@ -6,6 +6,7 @@ export interface YggdrasilSettings {
   chatModelPath: string;
   chatModelBaseUrl: string;
   chatModelApiKey: string;
+  chatModelHasVision: boolean;
   splitterChunkSize: number;
   splitterChunkOverlap: number;
 }
@@ -18,6 +19,7 @@ export const DEFAULT_SETTINGS: YggdrasilSettings = {
   chatModelPath: "",
   chatModelBaseUrl: "",
   chatModelApiKey: "",
+  chatModelHasVision: false,
   splitterChunkSize: 500,
   splitterChunkOverlap: 100,
 };

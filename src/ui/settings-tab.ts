@@ -1,4 +1,9 @@
-import type { App, ButtonComponent, TextComponent } from "obsidian";
+import type {
+  App,
+  ButtonComponent,
+  TextComponent,
+  ToggleComponent,
+} from "obsidian";
 import { Notice, PluginSettingTab, Setting } from "obsidian";
 
 import type YggdrasilPlugin from "../main";
@@ -64,6 +69,24 @@ export class YggdrasilSettingTab extends PluginSettingTab {
             const updated: YggdrasilSettings = {
               ...this.#plugin.getSettings(),
               chatModelApiKey: value,
+            };
+            await this.#plugin.setSettings(updated);
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("Vision Model")
+      .setDesc(
+        "Enable to allow attaching images to chat messages. " +
+          "Only enable if your chat model supports vision (e.g. gpt-4o, llama-3.2-vision).",
+      )
+      .addToggle((toggle: ToggleComponent): void => {
+        toggle
+          .setValue(settings.chatModelHasVision)
+          .onChange(async (value: boolean): Promise<void> => {
+            const updated: YggdrasilSettings = {
+              ...this.#plugin.getSettings(),
+              chatModelHasVision: value,
             };
             await this.#plugin.setSettings(updated);
           });

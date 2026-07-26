@@ -1,7 +1,9 @@
+import type { ChatMessage } from "../rag/interfaces";
+
 export interface IMessageHistory {
-  push(message: string): void;
+  push(message: ChatMessage): void;
   setDraft(text: string): void;
-  previous(): string;
+  previous(): ChatMessage | undefined;
   next(): string;
   clear(): void;
   readonly size: number;
@@ -9,7 +11,7 @@ export interface IMessageHistory {
 }
 
 export class MessageHistory implements IMessageHistory {
-  readonly #entries: Array<string>;
+  readonly #entries: Array<ChatMessage>;
   readonly #maxSize: number;
   #cursor: number;
   #draft: string;
@@ -25,7 +27,7 @@ export class MessageHistory implements IMessageHistory {
     this.#draft = text;
   }
 
-  public push(message: string): void {
+  public push(message: ChatMessage): void {
     this.#entries.push(message);
     if (this.#entries.length > this.#maxSize) {
       this.#entries.shift();
@@ -33,9 +35,9 @@ export class MessageHistory implements IMessageHistory {
     this.#cursor = -1;
   }
 
-  public previous(): string {
+  public previous(): ChatMessage | undefined {
     if (this.#entries.length === 0) {
-      return "";
+      return undefined;
     }
 
     if (this.#cursor === -1) {
@@ -62,7 +64,7 @@ export class MessageHistory implements IMessageHistory {
       return draft;
     }
 
-    return this.#entries[this.#cursor];
+    return this.#entries[this.#cursor].content;
   }
 
   public clear(): void {

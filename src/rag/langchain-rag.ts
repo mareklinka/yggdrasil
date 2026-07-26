@@ -4,12 +4,12 @@ import type { TFile, Vault } from "obsidian";
 import { deflate, inflate } from "pako";
 
 import type { YggdrasilSettings } from "../settings";
-import type { ChatMessage } from "./adapters/agent";
 import { LangchainAgentAdapter } from "./adapters/agent";
 import { LangchainEmbeddingsAdapter } from "./adapters/embeddings";
 import { RetrieveToolAdapter } from "./adapters/retrieve-tool";
 import { LangchainSplitterAdapter } from "./adapters/splitter";
 import { LangchainVectorStoreAdapter } from "./adapters/vector-store";
+import type { ChatAttachment, ChatMessage } from "./interfaces";
 import type { IAgent, IDocumentSplitter, IVectorStore } from "./interfaces";
 import { systemPrompt } from "./prompts";
 import { ListFolderTool, ReadFileTool } from "./vault-tools";
@@ -81,11 +81,18 @@ export class LangchainRag {
 
   public async query(
     query: string,
+    attachments: Array<ChatAttachment> | undefined,
     history: Array<ChatMessage>,
     signal?: AbortSignal,
   ): Promise<string> {
     console.log("Querying agent with messages:", query);
-    return this.#agent.invoke(query, history, signal);
+    const chatMessage: ChatMessage = {
+      role: "user",
+      content: query,
+      attachments:
+        attachments && attachments.length > 0 ? attachments : undefined,
+    };
+    return this.#agent.invoke(chatMessage, history, signal);
   }
 
   async #saveToDisk(): Promise<void> {

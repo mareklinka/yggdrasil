@@ -227,6 +227,74 @@
   flex-wrap: wrap;
 }
 
+.yggdrasil-chat-input-row--drag-over {
+  background-color: color-mix(
+    in srgb,
+    var(--interactive-accent) 12%,
+    transparent
+  );
+  outline: 2px dashed var(--interactive-accent);
+  outline-offset: -2px;
+}
+
+/* ── Attachment Tray ─────────────────────────────────────────────────────────── */
+
+.yggdrasil-chat-attachment-tray {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-2-2);
+  padding: 0 var(--size-4-4) var(--size-2-2);
+  min-height: 0;
+}
+
+.yggdrasil-chat-attachment-item {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.yggdrasil-chat-attachment-thumb {
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: var(--radius-s);
+  border: 1px solid var(--background-modifier-border);
+}
+
+.yggdrasil-chat-attachment-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: none;
+  background: var(--text-error);
+  color: var(--text-on-accent);
+  font-size: 10px;
+  line-height: 18px;
+  text-align: center;
+  cursor: pointer;
+  padding: 0;
+  margin: 0;
+}
+
+/* ── Images in User Bubbles ──────────────────────────────────────────────────── */
+
+.yggdrasil-chat-bubble-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-2-2);
+  margin-bottom: var(--size-2-2);
+}
+
+.yggdrasil-chat-bubble-image {
+  max-width: 200px;
+  max-height: 200px;
+  border-radius: var(--radius-s);
+  object-fit: contain;
+}
+
 .yggdrasil-chat-input {
   flex: 1;
   margin: 0;
