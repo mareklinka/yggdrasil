@@ -2,36 +2,42 @@ import type { App, PluginManifest, WorkspaceLeaf } from "obsidian";
 import { Notice, Plugin } from "obsidian";
 
 import { ChangeTracker } from "./rag/change-tracker";
+import type { LangchainRag } from "./rag/langchain-rag";
 import { createLangchainRag } from "./rag/langchain-rag";
+import type { YggdrasilSettings } from "./settings";
+import { DEFAULT_SETTINGS } from "./settings";
 import { CHAT_VIEW_TYPE, ChatView } from "./ui/chat-view";
 import { ReindexConfirmationModal } from "./ui/reindex-confirmation-modal";
+import { YggdrasilSettingTab } from "./ui/settings-tab";
 
 export default class YggdrasilPlugin extends Plugin {
-  readonly #rag;
-  readonly #changeTracker;
+  #rag!: LangchainRag;
+  #changeTracker!: ChangeTracker;
+  #data: YggdrasilSettings = DEFAULT_SETTINGS;
+
+  readonly #embeddingErrorHandler: (e: unknown) => void = (e) => {
+    throw e;
+  };
 
   public constructor(app: App, manifest: PluginManifest) {
     super(app, manifest);
-
-    this.#rag = createLangchainRag(this.app.vault, {
-      dbPath: `${this.app.vault.configDir}/plugins/${this.manifest.id}/vector_store.data`,
-    });
-
-    this.#changeTracker = new ChangeTracker(this.app.vault, this.#rag);
   }
 
   public async onload(): Promise<void> {
-    this.addCommand({
-      id: "hello-yggdrasil",
-      name: "Say Hello",
-      callback: () => {
-        new Notice("Yggdrasil plugin loaded successfully!");
-      },
-    });
+    this.addSettingTab(new YggdrasilSettingTab(this.app, this));
 
-    this.addRibbonIcon("sparkles", "Yggdrasil", () => {
-      this.#showReindexConfirmation();
-    });
+    // Load persisted settings and merge with defaults
+    const loaded: YggdrasilSettings | null = await this.loadData();
+    this.#data = { ...DEFAULT_SETTINGS, ...(loaded ?? {}) };
+
+    // Create RAG pipeline and change tracker
+    this.#rag = createLangchainRag(
+      this.app.vault,
+      this.#data,
+      this.#getDbPath(),
+      this.#embeddingErrorHandler,
+    );
+    this.#changeTracker = new ChangeTracker(this.app.vault, this.#rag);
 
     // Register chat view
     this.registerView(
@@ -58,11 +64,16 @@ export default class YggdrasilPlugin extends Plugin {
     // Chat ribbon icon
     this.addRibbonIcon("message-square", "Open Chat", openChat);
 
-    // Command palette entry
     this.addCommand({
-      id: "open-chat",
+      id: "yggdrasil-open-chat",
       name: "Open Chat",
       callback: openChat,
+    });
+
+    this.addCommand({
+      id: "yggdrasil-reindex",
+      name: "Re-index Vault",
+      callback: () => this.triggerReindex(),
     });
 
     console.log("Yggdrasil plugin loaded");
@@ -80,12 +91,56 @@ export default class YggdrasilPlugin extends Plugin {
     console.log("Yggdrasil plugin unloaded");
   }
 
-  async #showReindexConfirmation(): Promise<void> {
+  public getSettings(): YggdrasilSettings {
+    return this.#data;
+  }
+
+  public async setSettings(settings: YggdrasilSettings): Promise<void> {
+    this.#data = settings;
+    await this.saveData(this.#data);
+    this.#recreateRag();
+  }
+
+  public async triggerReindex(): Promise<void> {
     const modal = new ReindexConfirmationModal(this.app);
     modal.open();
 
     modal.onConfirmed = async (): Promise<void> => {
-      await this.#rag.index(...this.app.vault.getMarkdownFiles());
+      try {
+        await this.#rag.clear();
+        await this.#rag.index(...this.app.vault.getMarkdownFiles());
+        new Notice('Re-indexing complete')
+      } catch (error) {
+        const message: string =
+          error instanceof Error ? error.message : "Unknown error";
+        new Notice(`Re-indexing failed: ${message}`);
+      }
     };
+  }
+
+  #recreateRag(): void {
+    this.#changeTracker.unregisterEventListeners();
+    this.#rag = createLangchainRag(
+      this.app.vault,
+      this.#data,
+      this.#getDbPath(),
+      this.#embeddingErrorHandler,
+    );
+    this.#changeTracker = new ChangeTracker(this.app.vault, this.#rag);
+  }
+
+  #getDbPath(): string {
+    return (
+      `${this.app.vault.configDir}/plugins/${this.manifest.id}/` +
+      "vector_store.data"
+    );
+  }
+
+  public async loadData(): Promise<YggdrasilSettings | null> {
+    return (await super.loadData()) as YggdrasilSettings | null;
+  }
+
+  public async saveData(data: YggdrasilSettings): Promise<void> {
+    await super.saveData(data);
   }
 }

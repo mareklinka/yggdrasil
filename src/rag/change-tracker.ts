@@ -1,5 +1,5 @@
 import type { EventRef, TAbstractFile, Vault } from "obsidian";
-import { TFile } from "obsidian";
+import { Notice, TFile } from "obsidian";
 
 import type { LangchainRag } from "./langchain-rag";
 
@@ -111,12 +111,13 @@ export class ChangeTracker {
           }
         }
       } catch (error) {
-        const message =
+        const message: string =
           error instanceof Error ? error.message : "Unknown error";
         console.warn(
           `Yggdrasil: incremental operation failed for ${op.file.path}:`,
           message,
         );
+        new Notice(`Embedding failed for ${op.file.path}: ${message}`);
       }
     }
   }

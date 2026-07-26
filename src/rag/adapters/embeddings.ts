@@ -10,12 +10,18 @@ export class LangchainEmbeddingsAdapter implements IEmbeddings {
     baseUrl: string;
     dimensions: number;
     apiKey: string;
+    errorHandler: (e: unknown) => void;
   }) {
     this.#embeddings = new OpenAIEmbeddings({
       model: options.model,
-      // eslint-disable-next-line @typescript-eslint/naming-convention
-      configuration: { baseURL: options.baseUrl, apiKey: options.apiKey },
+      configuration: {
+        // eslint-disable-next-line @typescript-eslint/naming-convention
+        baseURL: options.baseUrl,
+        apiKey: !options.apiKey || options.apiKey === "" ? "-" : options.apiKey,
+      },
       dimensions: options.dimensions,
+      maxRetries: 2,
+      onFailedAttempt: (e): void => options.errorHandler(e),
     });
   }
 

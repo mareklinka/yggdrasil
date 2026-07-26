@@ -3,6 +3,7 @@ import { ChatOpenAI } from "@langchain/openai";
 import type { TFile, Vault } from "obsidian";
 import { deflate, inflate } from "pako";
 
+import type { YggdrasilSettings } from "../settings";
 import type { ChatMessage } from "./adapters/agent";
 import { LangchainAgentAdapter } from "./adapters/agent";
 import { LangchainEmbeddingsAdapter } from "./adapters/embeddings";
@@ -13,6 +14,10 @@ import type { IAgent, IDocumentSplitter, IVectorStore } from "./interfaces";
 import { systemPrompt } from "./prompts";
 import { ListFolderTool, ReadFileTool } from "./vault-tools";
 
+export interface DocumentMetadata {
+  path: string;
+}
+
 export class LangchainRag {
   readonly #vault: Vault;
   readonly #dbPath: string;
@@ -22,13 +27,13 @@ export class LangchainRag {
 
   public constructor(
     vault: Vault,
-    config: { dbPath: string },
+    dbPath: string,
     splitter: IDocumentSplitter,
     vectorStore: IVectorStore,
     agent: IAgent,
   ) {
     this.#vault = vault;
-    this.#dbPath = config.dbPath;
+    this.#dbPath = dbPath;
     this.#splitter = splitter;
     this.#vectorStore = vectorStore;
     this.#agent = agent;
@@ -49,7 +54,7 @@ export class LangchainRag {
       );
 
       docs.push(
-        new LangchainDocument({
+        new LangchainDocument<DocumentMetadata>({
           pageContent: content,
           metadata: { path: file.path },
         }),
@@ -65,6 +70,13 @@ export class LangchainRag {
 
   public delete(path: string): void {
     this.#vectorStore.deleteDocumentsByPath(path);
+  }
+
+  public async clear(): Promise<void> {
+    this.#vectorStore.setVectors([]);
+    if (await this.#vault.adapter.exists(this.#dbPath)) {
+      await this.#vault.adapter.remove(this.#dbPath);
+    }
   }
 
   public async query(
@@ -120,25 +132,34 @@ export class LangchainRag {
  */
 export function createLangchainRag(
   vault: Vault,
-  config: { dbPath: string },
+  settings: YggdrasilSettings,
+  dbPath: string,
+  embeddingErrorHandler: (e: unknown) => void
 ): LangchainRag {
-  const splitter = new LangchainSplitterAdapter(500, 100);
+  const splitter = new LangchainSplitterAdapter(
+    settings.splitterChunkSize,
+    settings.splitterChunkOverlap,
+  );
 
   const embeddings = new LangchainEmbeddingsAdapter({
-    model: "v5-small-retrieval-Q8_0.gguf",
-    baseUrl: "http://127.0.0.1:10001/v1",
-    dimensions: 1024,
-    apiKey: "-",
+    model: settings.embeddingsModelPath,
+    baseUrl: settings.embeddingsBaseUrl,
+    dimensions: settings.embeddingsDimensions,
+    apiKey: settings.embeddingsApiKey,
+    errorHandler: embeddingErrorHandler
   });
 
   const vectorStore = new LangchainVectorStoreAdapter(embeddings);
 
   const rawChatModel = new ChatOpenAI({
-    model: "/model/Qwen3.6-mtp-35B-A3B-UD-Q4_K_XL.gguf",
+    model: settings.chatModelPath,
     configuration: {
       // eslint-disable-next-line @typescript-eslint/naming-convention
-      baseURL: "http://brain.mar3ek.home:9001/v1",
-      apiKey: "-",
+      baseURL: settings.chatModelBaseUrl,
+      apiKey:
+        !settings.chatModelApiKey || settings.chatModelApiKey === ""
+          ? "-"
+          : settings.chatModelApiKey,
     },
   });
 
@@ -152,5 +173,5 @@ export function createLangchainRag(
     systemPrompt,
   });
 
-  return new LangchainRag(vault, config, splitter, vectorStore, agent);
+  return new LangchainRag(vault, dbPath, splitter, vectorStore, agent);
 }
