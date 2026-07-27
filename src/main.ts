@@ -1,5 +1,5 @@
 import type { App, PluginManifest, WorkspaceLeaf } from "obsidian";
-import { Notice, Plugin } from "obsidian";
+import { normalizePath, Notice, Plugin } from "obsidian";
 
 import { ChangeTracker } from "./rag/change-tracker";
 import type { LangchainRag } from "./rag/langchain-rag";
@@ -135,9 +135,9 @@ export default class YggdrasilPlugin extends Plugin {
   }
 
   #getDbPath(): string {
-    return (
+    return normalizePath(
       `${this.app.vault.configDir}/plugins/${this.manifest.id}/` +
-      "vector_store.data"
+        "vector_store.data",
     );
   }
 

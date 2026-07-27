@@ -1,17 +1,10 @@
 import type { Vault } from "obsidian";
-import { TFile, TFolder } from "obsidian";
+import { normalizePath, TFile, TFolder } from "obsidian";
 import { z } from "zod";
 
 import type { IVaultTool } from "./interfaces";
 
 const MaxReadFileSize = 100 * 1024;
-
-const isPathSafe = (path: string): boolean => {
-  if (path.startsWith("/") || path.includes("..")) {
-    return false;
-  }
-  return true;
-};
 
 export class ListFolderTool implements IVaultTool {
   readonly #vault: Vault;
@@ -39,14 +32,7 @@ export class ListFolderTool implements IVaultTool {
   }
 
   public async execute(params: Record<string, string>): Promise<string> {
-    const path = params.path;
-
-    if (!isPathSafe(path)) {
-      throw new Error(
-        `Invalid path: "${path}". Path must be vault-relative and must not contain '..' or start with '/'.`,
-      );
-    }
-
+    const path = normalizePath(params.path);
     const abstractFile = this.#vault.getAbstractFileByPath(path);
     if (abstractFile === null) {
       throw new Error(`Path does not exist in vault: "${path}".`);
@@ -103,14 +89,7 @@ export class ReadFileTool implements IVaultTool {
   }
 
   public async execute(params: Record<string, string>): Promise<string> {
-    const path = params.path;
-
-    if (!isPathSafe(path)) {
-      throw new Error(
-        `Invalid path: "${path}". Path must be vault-relative and must not contain '..' or start with '/'.`,
-      );
-    }
-
+    const path = normalizePath(params.path);
     const abstractFile = this.#vault.getAbstractFileByPath(path);
     if (abstractFile === null) {
       throw new Error(`Path does not exist in vault: "${path}".`);
