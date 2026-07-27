@@ -411,35 +411,36 @@ export class ChatView extends ItemView {
     const copyBtn: HTMLButtonElement = footer.createEl("button", {
       cls: "yggdrasil-chat-copy-btn",
     });
-    copyBtn.innerHTML = "\u2398 Copy message";
+    copyBtn.textContent = "\u2398 Copy message";
 
     // Hover on the column so cursor can move from bubble to footer without hiding
     col.addEventListener("mouseenter", (): void => {
-      footer.style.opacity = "1";
+      footer.addClass("yggdrasil-chat-bubble-footer--visible");
     });
     col.addEventListener("mouseleave", (): void => {
-      footer.style.opacity = "0";
+      footer.removeClass("yggdrasil-chat-bubble-footer--visible");
     });
 
-    copyBtn.addEventListener("click", (evt: MouseEvent): void => {
-      evt.stopPropagation();
-      const clipboard = navigator.clipboard;
-      if (clipboard === undefined) {
-        return;
-      }
+    copyBtn.addEventListener(
+      "click",
+      async (evt: MouseEvent): Promise<void> => {
+        evt.stopPropagation();
+        const clipboard = navigator.clipboard;
+        if (clipboard === undefined) {
+          return;
+        }
 
-      clipboard
-        .writeText(text)
-        .then(() => {
-          copyBtn.innerHTML = "\u2713 Copied";
+        try {
+          await clipboard.writeText(text);
+          copyBtn.textContent = "\u2713 Copied";
           setTimeout(() => {
-            copyBtn.innerHTML = "\u2398 Copy message";
+            copyBtn.textContent = "\u2398 Copy message";
           }, 1000);
-        })
-        .catch((): void => {
+        } catch {
           // Clipboard write failed silently
-        });
-    });
+        }
+      },
+    );
 
     this.#scrollToBottom();
   }
@@ -488,11 +489,13 @@ export class ChatView extends ItemView {
     }
     if (!this.getSettings().chatModelHasVision) {
       this.#attachmentTrayEl.empty();
-      this.#attachmentTrayEl.style.display = "none";
+      this.#attachmentTrayEl.addClass("yggdrasil-chat-attachment-tray--hidden");
       this.#pendingAttachments = [];
       return;
     }
-    this.#attachmentTrayEl.style.display = "";
+    this.#attachmentTrayEl.removeClass(
+      "yggdrasil-chat-attachment-tray--hidden",
+    );
     this.#attachmentTrayEl.empty();
     for (let i = 0; i < this.#pendingAttachments.length; i++) {
       const idx = i;

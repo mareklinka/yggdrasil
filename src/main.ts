@@ -67,17 +67,17 @@ export default class YggdrasilPlugin extends Plugin {
     };
 
     // Chat ribbon icon
-    this.addRibbonIcon("message-square", "Open Chat", openChat);
+    this.addRibbonIcon("message-square", "Open chat", openChat);
 
     this.addCommand({
       id: "yggdrasil-open-chat",
-      name: "Open Chat",
+      name: "Open chat",
       callback: openChat,
     });
 
     this.addCommand({
       id: "yggdrasil-reindex",
-      name: "Re-index Vault",
+      name: "Re-index vault",
       callback: () => this.triggerReindex(),
     });
 
@@ -85,13 +85,6 @@ export default class YggdrasilPlugin extends Plugin {
   }
 
   public onunload(): void {
-    // Detach all chat view leaves
-    const chatLeaves: Array<WorkspaceLeaf> =
-      this.app.workspace.getLeavesOfType(CHAT_VIEW_TYPE);
-    chatLeaves.forEach((leaf: WorkspaceLeaf): void => {
-      leaf.detach();
-    });
-
     this.#changeTracker.unregisterEventListeners();
     console.log("Yggdrasil plugin unloaded");
   }

@@ -44,14 +44,13 @@ export class ListFolderTool implements IVaultTool {
       throw new Error(`Path is not a folder: "${path}".`);
     }
 
-    const listed = await this.#vault.adapter.list(path);
-    const result: Array<{ type: "file" | "folder"; path: string }> = [
-      ...listed.files.map((f: string) => ({ type: "file" as const, path: f })),
-      ...listed.folders.map((f: string) => ({
-        type: "folder" as const,
-        path: f,
-      })),
-    ];
+    const result: Array<{ type: "file" | "folder"; path: string }> =
+      abstractFile.children
+        .filter((c) => c instanceof TFile || c instanceof TFolder)
+        .map((c) => ({
+          type: c instanceof TFile ? "file" : "folder",
+          path: c.path,
+        }));
 
     return JSON.stringify(result, null, 2);
   }
@@ -122,7 +121,7 @@ export class ReadFileTool implements IVaultTool {
       }
     }
 
-    const content = await this.#vault.adapter.read(path);
+    const content = await this.#vault.cachedRead(abstractFile);
     const lines = content.split("\n");
 
     if (toLine !== undefined) {

@@ -16,7 +16,9 @@ export class ReindexConfirmationModal extends Modal {
       text: "This will clear all embeddings and rebuild the index. This may take a while.",
     });
 
-    const buttonContainer = contentEl.createDiv({ cls: "mod-footer" });
+    const buttonContainer = contentEl.createDiv({
+      cls: "mod-footer yggdrasil-modal-footer",
+    });
 
     const cancelButton = buttonContainer.createEl("button", {
       text: "Cancel",

@@ -31,10 +31,10 @@ export class YggdrasilSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     const settings: YggdrasilSettings = this.#plugin.getSettings();
 
-    containerEl.createEl("h2", { text: "Basic Settings" });
+    new Setting(containerEl).setName("Basic").setHeading();
 
     new Setting(containerEl)
-      .setName("Chat Model Name")
+      .setName("Chat model name")
       .setDesc("Name of the chat model")
       .addText((text: TextComponent): void => {
         text
@@ -50,7 +50,7 @@ export class YggdrasilSettingTab extends PluginSettingTab {
 
     this.#renderBaseUrlSetting(
       containerEl,
-      "Chat Model Base URL",
+      "Chat model base URL",
       "Base URL for the chat model API (OpenAI-compatible)",
       settings.chatModelBaseUrl,
       (value: string): YggdrasilSettings => ({
@@ -60,7 +60,7 @@ export class YggdrasilSettingTab extends PluginSettingTab {
     );
 
     new Setting(containerEl)
-      .setName("Chat Model API Key")
+      .setName("Chat model API key")
       .setDesc("Key for the chat model API")
       .addText((text: TextComponent): void => {
         text
@@ -75,7 +75,7 @@ export class YggdrasilSettingTab extends PluginSettingTab {
       });
 
     new Setting(containerEl)
-      .setName("Vision Model")
+      .setName("Vision model")
       .setDesc(
         "Enable to allow attaching images to chat messages. " +
           "Only enable if your chat model supports vision (e.g. gpt-4o, llama-3.2-vision).",
@@ -93,7 +93,7 @@ export class YggdrasilSettingTab extends PluginSettingTab {
       });
 
     new Setting(containerEl)
-      .setName("Embedding Model Name")
+      .setName("Embedding model name")
       .setDesc("Name of the embeddings model")
       .addText((text: TextComponent): void => {
         text
@@ -109,7 +109,7 @@ export class YggdrasilSettingTab extends PluginSettingTab {
 
     this.#renderBaseUrlSetting(
       containerEl,
-      "Embedding Base URL",
+      "Embedding base URL",
       "Base URL for the embeddings API (OpenAI-compatible)",
       settings.embeddingsBaseUrl,
       (value: string): YggdrasilSettings => ({
@@ -119,7 +119,7 @@ export class YggdrasilSettingTab extends PluginSettingTab {
     );
 
     new Setting(containerEl)
-      .setName("Embedding API Key")
+      .setName("Embedding API key")
       .setDesc("Key for the embedding API")
       .addText((text: TextComponent): void => {
         text
@@ -163,16 +163,11 @@ export class YggdrasilSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     const settings: YggdrasilSettings = this.#plugin.getSettings();
 
-    const details: HTMLDetailsElement = containerEl.createEl("details", {
-      cls: "yggdrasil-details",
-    });
-    details.createEl("summary", { text: "Advanced Settings" });
-
-    const wrapper: HTMLDivElement = details.createEl("div");
+    new Setting(containerEl).setName("Advanced").setHeading();
 
     this.#renderPositiveIntSetting(
-      wrapper,
-      "Embeddings Dimensions",
+      containerEl,
+      "Embedding dimensions",
       "Number of embedding dimensions",
       settings.embeddingsDimensions,
       (value: number): YggdrasilSettings => ({
@@ -182,8 +177,8 @@ export class YggdrasilSettingTab extends PluginSettingTab {
     );
 
     this.#renderPositiveIntSetting(
-      wrapper,
-      "Chunk Size",
+      containerEl,
+      "Chunk size",
       "Number of characters per chunk",
       settings.splitterChunkSize,
       (value: number): YggdrasilSettings => ({
@@ -193,8 +188,8 @@ export class YggdrasilSettingTab extends PluginSettingTab {
     );
 
     this.#renderPositiveIntSetting(
-      wrapper,
-      "Chunk Overlap",
+      containerEl,
+      "Chunk overlap",
       "Number of overlapping characters between chunks",
       settings.splitterChunkOverlap,
       (value: number): YggdrasilSettings => ({
@@ -238,15 +233,15 @@ export class YggdrasilSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     const settings: YggdrasilSettings = this.#plugin.getSettings();
 
-    containerEl.createEl("h2", { text: "Indexing" });
+    new Setting(containerEl).setName("Indexing").setHeading();
 
     new Setting(containerEl)
-      .setName("Re-index Vault")
+      .setName("Re-index vault")
       .setDesc("Clear all embeddings and rebuild the index from scratch")
       .addButton((button: ButtonComponent): void => {
         button
-          .setButtonText("Re-index Vault")
-          .setCta()
+          .setButtonText("Re-index vault")
+          .setWarning()
           .onClick(async (): Promise<void> => {
             if (settings.embeddingsBaseUrl === "") {
               new Notice("Set Embedding Base URL before reindexing");

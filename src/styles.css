@@ -78,6 +78,10 @@
   transition: opacity 0.15s ease;
 }
 
+.yggdrasil-chat-bubble-footer--visible {
+  opacity: 1;
+}
+
 .yggdrasil-chat-copy-btn {
   font-size: var(--font-ui-smaller);
   font-family: var(--font-interface);
@@ -247,6 +251,10 @@
   min-height: 0;
 }
 
+.yggdrasil-chat-attachment-tray--hidden {
+  display: none;
+}
+
 .yggdrasil-chat-attachment-item {
   position: relative;
   display: inline-flex;
@@ -372,47 +380,6 @@
   }
 }
 
-/* Settings – collapsible advanced section */
-
-.yggdrasil-details {
-  margin-top: 8px;
-  padding: 8px 16px;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 4px;
-}
-
-.yggdrasil-details > summary {
-  cursor: pointer;
-  font-weight: 600;
-  list-style: none;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.yggdrasil-details > summary::-webkit-details-marker {
-  display: none;
-}
-
-.yggdrasil-details > summary::before {
-  content: "▸";
-  display: inline-block;
-  transition: transform 0.15s ease;
-}
-
-.yggdrasil-details[open] > summary::before {
-  transform: rotate(90deg);
-}
-
-.yggdrasil-details > div > .setting-item {
-  border: none;
-  padding: 8px 0;
-}
-
-.yggdrasil-details > div > .setting-item:first-of-type {
-  padding-top: 4px;
-}
-
 /* Settings – validation error */
 
 .yggdrasil-input-error {
@@ -422,4 +389,13 @@
     var(--text-error) 8%,
     transparent
   ) !important;
+}
+
+/* Modal footer */
+
+.yggdrasil-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--size-2-2);
+  padding-top: var(--size-4-4);
 }
