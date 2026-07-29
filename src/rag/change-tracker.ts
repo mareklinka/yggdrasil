@@ -69,10 +69,18 @@ export class ChangeTracker {
       this.#debounceTimer = null;
     }
 
+    // For modify events, deduplicate: only the latest per file matters
+    if (type === "modify") {
+      this.#debouncePending = this.#debouncePending.filter(
+        (pending) =>
+          !(pending.type === "modify" && pending.file.path === file.path),
+      );
+    }
+
     // Enqueue the operation
     this.#debouncePending.push({ type, file, oldPath });
 
-    // Set new debounce timer (1 second)
+    // Set new debounce timer (30 seconds)
     this.#debounceTimer = setTimeout(async () => {
       this.#debounceTimer = null;
       await this.#processDebounceQueue();
