@@ -8,6 +8,7 @@ import { MessageHistory } from "./message-history";
 
 const MAX_ATTACHMENT_SIZE = 1 * 1024 * 1024;
 const MAX_ATTACHMENTS = 3;
+const SUPPORTED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif"]);
 
 export const CHAT_VIEW_TYPE = "yggdrasil-chat";
 
@@ -101,6 +102,7 @@ export class ChatView extends ItemView {
     // Paste handler for images
     input.addEventListener("paste", (evt: ClipboardEvent): void => {
       if (!this.getSettings().chatModelHasVision) {
+        new Notice("Attachments are only supported for vision models");
         return;
       }
       const items = evt.clipboardData?.items;
@@ -109,7 +111,8 @@ export class ChatView extends ItemView {
       }
       for (let i = 0; i < items.length; i++) {
         const item = items[i];
-        if (!item.type.startsWith("image/")) {
+        if (!SUPPORTED_IMAGE_TYPES.has(item.type)) {
+          new Notice("Only JPEG, PNG, and GIF images are supported");
           continue;
         }
         evt.preventDefault();
@@ -141,10 +144,11 @@ export class ChatView extends ItemView {
     });
 
     inputRow.addEventListener("drop", (evt: DragEvent): void => {
+      evt.preventDefault();
       if (!this.getSettings().chatModelHasVision) {
+        new Notice("Attachments are only supported for vision models");
         return;
       }
-      evt.preventDefault();
       inputRow.removeClass("yggdrasil-chat-input-row--drag-over");
       const files = evt.dataTransfer?.files;
       if (files === null || files === undefined) {
@@ -152,8 +156,10 @@ export class ChatView extends ItemView {
       }
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        if (file.type.startsWith("image/")) {
+        if (SUPPORTED_IMAGE_TYPES.has(file.type)) {
           this.#addFile(file);
+        } else {
+          new Notice("Only JPEG, PNG, and GIF images are supported");
         }
       }
     });
@@ -455,6 +461,11 @@ export class ChatView extends ItemView {
 
   #addFile(file: File): void {
     if (!this.getSettings().chatModelHasVision) {
+      new Notice("Attachments are only supported for vision models");
+      return;
+    }
+    if (!SUPPORTED_IMAGE_TYPES.has(file.type)) {
+      new Notice("Only JPEG, PNG, and GIF images are supported");
       return;
     }
     if (this.#pendingAttachments.length >= MAX_ATTACHMENTS) {
