@@ -39,6 +39,31 @@
                 "cwd": ".opencode/container"
             },
             "problemMatcher": []
+        },
+        {
+            "label": "Claude CLI",
+            "type": "shell",
+            "command": "podman",
+            "args": [
+                "exec",
+                "-it",
+                "-e",
+                "COLORTERM=truecolor",
+                "-w",
+                "/source",
+                "yggdrasil-opencode-dev-1",
+                "claude"
+            ],
+            "presentation": {
+                "echo": false,
+                "reveal": "always",
+                "focus": true,
+                "panel": "dedicated",
+                "showReuseMessage": false,
+                "clear": true,
+                "close": true
+            },
+            "problemMatcher": []
         }
     ]
 }

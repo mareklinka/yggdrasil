@@ -32,3 +32,5 @@ test-vault/.obsidian/plugins/yggdrasil/vector_store.data
 .opencode/container/squid/squid-cert.pem
 .opencode/container/squid/squid-key.pem
 test-vault/.obsidian/plugins/yggdrasil/data.json
+
+.claude

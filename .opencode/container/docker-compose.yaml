@@ -18,6 +18,8 @@ services:
       - ../opencode.local.json:/home/root/.config/opencode/local/opencode.json:ro
       # and this hides the whole .opencode/container config from the model
       - ./nonexistent:/source/.opencode/container:ro
+      # persistent storage for global Claude data, such as auth sessions
+      - claude-data:/claude
     working_dir: /source
     stdin_open: true
     tty: true
@@ -40,6 +42,7 @@ services:
       - NO_PROXY=127.0.0.1,localhost,*.local,host-proxy
       - OPENCODE_CONFIG_DIR=/home/root/.config/opencode/local
       - OPENCODE_DISABLE_MODELS_FETCH=1
+      - CLAUDE_CONFIG_DIR=/claude
     networks:
       internal:
         ipv4_address: 172.3.1.1
@@ -95,3 +98,4 @@ networks:
 volumes:
   yggdrasil-opencode-data:
   squid-ssl-db:
+  claude-data:

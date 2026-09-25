@@ -141,7 +141,7 @@ USER opencodeuser
 
 # Global npm packages need a user-writable prefix
 RUN npm config set prefix '~/.local/'
-ENV PATH="/home/opencodeuser/.local/bin:/home/opencodeuser/.dotnet/tools:${PATH}"
+ENV PATH="/home/opencodeuser/.local/bin:${PATH}"
 ```
 
 Replace the existing root-targeted `ENV PATH="/root/..."` line with the user-scoped one above.
@@ -162,7 +162,6 @@ build:
 ### Notes
 
 - The `WORKDIR /source` directive should appear **after** `USER opencodeuser` so the directory is created with correct ownership (though the bind mount overrides ownership at runtime).
-- The `dotnet tool install --global` and `npm i -g` commands must run **after** `USER` so tools install into the user's home directory.
 - The `security_opt: no-new-privileges:true` and `cap_drop: ALL` settings in docker-compose.yaml apply regardless of rooted/rootless mode.
 
 ## Usage
