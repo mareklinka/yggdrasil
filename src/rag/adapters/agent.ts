@@ -5,56 +5,29 @@ import {
   SystemMessage,
   ToolMessage,
 } from "@langchain/core/messages";
+import type { ToolCall } from "@langchain/core/messages/tool";
 import { tool } from "@langchain/core/tools";
-import { END, START, StateGraph } from "@langchain/langgraph";
-import { Annotation, MessagesAnnotation } from "@langchain/langgraph";
-import { ToolNode } from "@langchain/langgraph/prebuilt";
+import { entrypoint, task } from "@langchain/langgraph";
 import type { ChatOpenAI } from "@langchain/openai";
 import { z } from "zod";
 
 import type { ChatMessage, IAgent, IVaultTool } from "../interfaces";
 import { evaluatorPrompt } from "../prompts";
 
-const retrieverNode = "retriever";
-const evaluatorNode = "evaluator";
-const toolsNode = "tools";
-
-const AgentState = Annotation.Root({
-  // Messages accumulate through the conversation
-  ...MessagesAnnotation.spec,
-
-  // Track which tools have been called (for debugging)
-  toolCallCount: Annotation<number>({
-    reducer: (current, update) => update ?? current ?? 0,
-    default: () => 0,
-  }),
+interface AgentInput {
+  // Conversation history followed by the current user message
+  messages: Array<BaseMessage>;
 
   // The current user query, for the evaluator (messages also contain history)
-  userQuery: Annotation<string>({
-    reducer: (current, update) => update ?? current ?? "",
-    default: () => "",
-  }),
+  userQuery: string;
+}
 
-  // Final answer from the agent
-  finalAnswer: Annotation<string>({
-    reducer: (current, update) => update ?? current ?? "",
-    default: () => "",
-  }),
-
-  // Evaluator's routing decision
-  evaluatorDecision: Annotation<"end" | "retriever" | undefined>({
-    reducer: (current, update) => update ?? current,
-    default: () => undefined,
-  }),
-
-  // Number of times the retriever node has been executed
-  retrieverCallCount: Annotation<number>({
-    reducer: (_current, update) => update ?? 0,
-    default: () => 0,
-  }),
+const EvaluationSchema = z.object({
+  quality: z.enum(["good", "poor"]),
+  reason: z.string(),
 });
 
-export type AgentStateType = typeof AgentState.State;
+type Evaluation = z.infer<typeof EvaluationSchema>;
 
 export class LangchainAgentAdapter implements IAgent {
   readonly #invoker: (
@@ -75,14 +48,16 @@ export class LangchainAgentAdapter implements IAgent {
         schema: z.object(vt.zodSchema),
       }),
     );
+    const toolsByName = new Map(langchainTools.map((t) => [t.name, t]));
 
     // Main LLM bound to tools for agent loop
     const llm = options.model.bindTools(langchainTools);
 
-    // Separate LLM instance for evaluation (not bound to tools, so its events don't leak into the graph stream)
-    const evaluationLlm = options.model.bindTools([]);
+    // LLM without tools, for evaluation and for forcing a text answer
+    const plainLlm = options.model.bindTools([]);
     const MAX_RETRIEVER_ITERATIONS = 3;
     const MAX_EVALUATOR_CONTEXT_CHARS = 30_000;
+    const MAX_TOOL_ROUNDS = 10;
 
     const extractText = (c: string | Array<ContentBlock | string>): string => {
       if (typeof c === "string") {
@@ -148,164 +123,173 @@ export class LangchainAgentAdapter implements IAgent {
       return text.trim();
     };
 
-    const callModel = async (
-      state: typeof AgentState.State,
-    ): Promise<Partial<typeof AgentState.State>> => {
-      console.log(
-        `Retriever turn (evaluation round ${state.retrieverCallCount + 1} of ${MAX_RETRIEVER_ITERATIONS})`,
-        state,
-      );
+    const toolCallsOf = (message: BaseMessage): Array<ToolCall> =>
+      message instanceof AIMessage ? (message.tool_calls ?? []) : [];
 
-      const messages = [
-        new SystemMessage(options.systemPrompt),
-        ...state.messages,
-      ];
-
-      const response = await llm.invoke(messages);
-
-      return {
-        messages: [response],
-      };
-    };
-
-    const toolNode = new ToolNode(langchainTools);
-
-    const evaluateAnswer = async (
-      state: typeof AgentState.State,
-    ): Promise<Partial<typeof AgentState.State>> => {
-      console.log("Evaluating answer quality for state:", state);
-
-      const lastMessage = state.messages[state.messages.length - 1];
-      const content =
-        lastMessage instanceof AIMessage ? lastMessage.content : "";
-
-      const answerText = extractText(content).trim();
-
-      // Store the proposed answer
-      const finalAnswer: string = answerText;
-
-      // Force end on the final allowed iteration
-      if (state.retrieverCallCount >= MAX_RETRIEVER_ITERATIONS) {
-        return {
-          finalAnswer,
-          toolCallCount: state.toolCallCount,
-          evaluatorDecision: "end",
-          messages: [...state.messages],
-        };
-      }
-
-      // Use LLM to evaluate answer quality
-      const evaluationPrompt = [
-        new SystemMessage(evaluatorPrompt),
-        new HumanMessage(
-          `User query: ${state.userQuery || "N/A"}\n\n` +
-            `Retrieved context:\n${collectToolContext(state.messages)}\n\n` +
-            `AI response: ${answerText}`,
-        ),
-      ];
-
-      const evaluationResponse = await evaluationLlm.invoke(evaluationPrompt);
-      const evaluationContent =
-        evaluationResponse instanceof AIMessage
-          ? evaluationResponse.content
-          : "";
-
-      // Parse the evaluation result using Zod
-      const EvaluationSchema = z.object({
-        quality: z.enum(["good", "poor"]),
-        reason: z.string(),
-      });
-
-      let decision: "end" | "retriever" = "end";
-      let nextCallCount = state.retrieverCallCount;
-      const messages = [...state.messages];
-
-      try {
-        const evaluationText = extractText(evaluationContent);
-
-        const parsed = EvaluationSchema.safeParse(
-          JSON.parse(extractJson(evaluationText)),
+    // Retriever turn: tool-bound model call
+    const callModel = task(
+      "callModel",
+      async (
+        messages: Array<BaseMessage>,
+        retrieverRound: number,
+      ): Promise<BaseMessage> => {
+        console.log(
+          `Retriever turn (evaluation round ${retrieverRound + 1} of ${MAX_RETRIEVER_ITERATIONS})`,
+          messages,
         );
-        if (parsed.success && parsed.data.quality === "poor") {
-          decision = "retriever";
-          nextCallCount = state.retrieverCallCount + 1;
-          messages.push(
-            new HumanMessage("Evaluation result: " + parsed.data.reason),
+        return llm.invoke([
+          new SystemMessage(options.systemPrompt),
+          ...messages,
+        ]);
+      },
+    );
+
+    // Tool budget exhausted: same prompt, no tools bound, so the model must answer in text
+    const forceAnswer = task(
+      "forceAnswer",
+      async (messages: Array<BaseMessage>): Promise<BaseMessage> =>
+        plainLlm.invoke([new SystemMessage(options.systemPrompt), ...messages]),
+    );
+
+    // Failures become error tool messages, like ToolNode's default error handling
+    const callTool = task(
+      "callTool",
+      async (toolCall: ToolCall): Promise<ToolMessage> => {
+        const toToolMessage = (
+          content: string,
+          status: "success" | "error",
+        ): ToolMessage =>
+          new ToolMessage({
+            content,
+            name: toolCall.name,
+            // eslint-disable-next-line @typescript-eslint/naming-convention
+            tool_call_id: toolCall.id ?? "",
+            status,
+          });
+
+        try {
+          const langchainTool = toolsByName.get(toolCall.name);
+          if (langchainTool === undefined) {
+            throw new Error(`Tool "${toolCall.name}" not found.`);
+          }
+          const result: unknown = await langchainTool.invoke(toolCall);
+          if (result instanceof ToolMessage) {
+            return result;
+          }
+          return toToolMessage(
+            typeof result === "string" ? result : JSON.stringify(result),
+            "success",
+          );
+        } catch (e) {
+          const message = e instanceof Error ? e.message : String(e);
+          return toToolMessage(
+            `Error: ${message}\n Please fix your mistakes.`,
+            "error",
           );
         }
-      } catch (e) {
-        // If parsing fails, default to ending (conservative approach)
-        console.warn(
-          "Failed to parse evaluation response, defaulting to end",
-          e,
-        );
-      }
+      },
+    );
 
-      console.log(`Evaluator result:", `, decision, {
-        decision: decision,
-        answer: answerText,
-      });
+    // Returns undefined when the evaluator output cannot be parsed
+    const evaluate = task(
+      "evaluate",
+      async (
+        userQuery: string,
+        messages: Array<BaseMessage>,
+        answerText: string,
+      ): Promise<Evaluation | undefined> => {
+        console.log("Evaluating answer quality", { userQuery, answerText });
 
-      return {
-        finalAnswer,
-        toolCallCount: state.toolCallCount,
-        evaluatorDecision: decision,
-        retrieverCallCount: nextCallCount,
-        messages: messages,
-      };
-    };
+        const evaluationPrompt = [
+          new SystemMessage(evaluatorPrompt),
+          new HumanMessage(
+            `User query: ${userQuery || "N/A"}\n\n` +
+              `Retrieved context:\n${collectToolContext(messages)}\n\n` +
+              `AI response: ${answerText}`,
+          ),
+        ];
 
-    // Conditional edge from model: should we continue to tools or evaluator?
-    const shouldContinueFromModel = (
-      state: typeof AgentState.State,
-    ): typeof toolsNode | typeof evaluatorNode => {
-      const lastMessage = state.messages[state.messages.length - 1];
+        const evaluationResponse = await plainLlm.invoke(evaluationPrompt);
+        const evaluationContent =
+          evaluationResponse instanceof AIMessage
+            ? evaluationResponse.content
+            : "";
 
-      // If the last message has tool calls, route to tools
-      if (
-        lastMessage instanceof AIMessage &&
-        lastMessage.tool_calls &&
-        lastMessage.tool_calls.length > 0
-      ) {
-        return toolsNode;
-      }
+        try {
+          const parsed = EvaluationSchema.safeParse(
+            JSON.parse(extractJson(extractText(evaluationContent))),
+          );
+          return parsed.success ? parsed.data : undefined;
+        } catch (e) {
+          // If parsing fails, default to ending (conservative approach)
+          console.warn(
+            "Failed to parse evaluation response, defaulting to end",
+            e,
+          );
+          return undefined;
+        }
+      },
+    );
 
-      // Otherwise, route to evaluator for quality check
-      return evaluatorNode;
-    };
+    const agent = entrypoint(
+      { name: "agent" },
+      async (input: AgentInput): Promise<string> => {
+        let messages = input.messages;
 
-    // Conditional edge from evaluator: should we retry or end?
-    const shouldContinueFromEvaluator = (
-      state: typeof AgentState.State,
-    ): typeof retrieverNode | typeof END => {
-      // Use the evaluator's LLM-based decision
-      if (state.evaluatorDecision === retrieverNode) {
-        return retrieverNode;
-      }
-      return END;
-    };
+        for (let retrieverRound = 0; ; retrieverRound++) {
+          let response = await callModel(messages, retrieverRound);
 
-    const graph = new StateGraph(AgentState)
-      // Add nodes
-      .addNode(retrieverNode, callModel)
-      .addNode(evaluatorNode, evaluateAnswer)
-      .addNode(toolsNode, toolNode)
+          // Tool loop: run requested tools and call the model again, up to the round limit
+          for (let toolRound = 0; ; toolRound++) {
+            const toolCalls = toolCallsOf(response);
+            if (toolCalls.length === 0) {
+              break;
+            }
+            if (toolRound >= MAX_TOOL_ROUNDS) {
+              console.warn(
+                `Tool round limit (${MAX_TOOL_ROUNDS}) reached, forcing an answer`,
+              );
+              response = await forceAnswer(messages);
+              break;
+            }
+            const results = await Promise.all(
+              toolCalls.map((tc) => callTool(tc)),
+            );
+            messages = [...messages, response, ...results];
+            response = await callModel(messages, retrieverRound);
+          }
+          messages = [...messages, response];
 
-      // Add edges
-      .addEdge(START, retrieverNode)
-      .addConditionalEdges(retrieverNode, shouldContinueFromModel, {
-        tools: toolsNode,
-        [evaluatorNode]: evaluatorNode,
-      })
-      .addEdge(toolsNode, retrieverNode)
-      .addConditionalEdges(evaluatorNode, shouldContinueFromEvaluator, {
-        retriever: retrieverNode,
-        [END]: END,
-      });
+          const content = response instanceof AIMessage ? response.content : "";
+          const answerText = extractText(content).trim();
 
-    const compiledGraph = graph.compile();
+          // Force end on the final allowed iteration
+          if (retrieverRound >= MAX_RETRIEVER_ITERATIONS) {
+            return answerText;
+          }
 
-    // Compile the graph
+          const evaluation = await evaluate(
+            input.userQuery,
+            messages,
+            answerText,
+          );
+          const decision = evaluation?.quality === "poor" ? "retriever" : "end";
+          console.log("Evaluator result:", decision, {
+            decision,
+            answer: answerText,
+          });
+
+          if (evaluation?.quality !== "poor") {
+            return answerText;
+          }
+          messages = [
+            ...messages,
+            new HumanMessage("Evaluation result: " + evaluation.reason),
+          ];
+        }
+      },
+    );
+
     this.#invoker = async (
       query: ChatMessage,
       history: Array<ChatMessage>,
@@ -345,7 +329,7 @@ export class LangchainAgentAdapter implements IAgent {
           ? `${query.content}\n[User attached ${attachmentCount} image(s)]`
           : query.content;
 
-      const stream = await compiledGraph.stream(
+      const answer = await agent.invoke(
         {
           messages: [...historyMessages, toLangchainMessage(query)],
           userQuery,
@@ -353,18 +337,11 @@ export class LangchainAgentAdapter implements IAgent {
         { signal },
       );
 
-      let finalAnswer = "";
-      for await (const update of stream) {
-        if (signal?.aborted) {
-          throw new DOMException("Aborted", "AbortError");
-        }
-        const evaluatorUpdate = update.evaluator as
-          typeof AgentState.State | undefined;
-        if (evaluatorUpdate?.finalAnswer) {
-          finalAnswer = evaluatorUpdate.finalAnswer;
-        }
+      // Covers an abort that lands after the last task but before invoke resolves
+      if (signal?.aborted) {
+        throw new DOMException("Aborted", "AbortError");
       }
-      return finalAnswer;
+      return answer;
     };
   }
 

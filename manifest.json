@@ -5,5 +5,5 @@
   "minAppVersion": "1.7.0",
   "description": "RAG-powered AI assistance for dungeon masters and world-builders. Index your vault, search semantically, and get AI-enhanced answers.",
   "author": "Yggdrasil",
-  "isDesktopOnly": false
+  "isDesktopOnly": true
 }
