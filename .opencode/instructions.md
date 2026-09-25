@@ -31,8 +31,8 @@ The project is an Obsidian community plugin (`YggdrasilPlugin extends Plugin` in
 
 - **RAG pipeline** (`src/rag/`): `LangchainRag` is the central class, composed of a document splitter, vector store, and agent. All are wired together by the `createLangchainRag()` factory function (composition root).
 - **Interface segregation** (`src/rag/interfaces.ts`): Small, focused interfaces (`IDocumentSplitter`, `IEmbeddings`, `IVectorStore`, `IRetrieveTool`, `IAgent`). Adapters implement these interfaces to wrap langchain components.
-- **LangGraph agent** (`src/rag/adapters/agent.ts`): StateGraph with retriever → tools → evaluator nodes. The evaluator uses an LLM call to decide whether the answer is good or needs re-retrieval.
-- **Change tracking** (`src/rag/change-tracker.ts`): Debounced (1s) Obsidian vault event listeners for modify/delete/rename, triggering incremental re-indexing.
+- **LangGraph agent** (`src/rag/adapters/agent.ts`): Functional API `entrypoint` looping over `task`s: model call → tools (max 10 rounds per pass, then a forced tool-less answer) → evaluator. The evaluator uses an LLM call to decide whether the answer is good or needs re-retrieval (max 3 retries).
+- **Change tracking** (`src/rag/change-tracker.ts`): Debounced (30s) Obsidian vault event listeners for modify/delete/rename, triggering incremental re-indexing.
 - **UI** (`src/ui/`): `ChatView` extends `ItemView` (side panel chat interface). `ReindexConfirmationModal` extends `Modal`. Both follow standard Obsidian lifecycle methods.
 - **Persistence**: Vector store serialized to JSON, compressed with pako (deflate/inflate), written as binary via `Vault.adapter.writeBinary`.
 
@@ -70,7 +70,7 @@ The project is an Obsidian community plugin (`YggdrasilPlugin extends Plugin` in
 | RAG core class          | `src/rag/langchain-rag.ts`             |
 | Interface definitions   | `src/rag/interfaces.ts`                |
 | Adapter implementations | `src/rag/adapters/*.ts`                |
-| Agent state graph       | `src/rag/adapters/agent.ts`            |
+| Agent loop              | `src/rag/adapters/agent.ts`            |
 | Change tracker          | `src/rag/change-tracker.ts`            |
 | System prompt           | `src/rag/prompts.ts`                   |
 | Chat UI                 | `src/ui/chat-view.ts`                  |
