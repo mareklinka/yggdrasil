@@ -28,6 +28,12 @@ const AgentState = Annotation.Root({
     default: () => 0,
   }),
 
+  // The current user query, for the evaluator (messages also contain history)
+  userQuery: Annotation<string>({
+    reducer: (current, update) => update ?? current ?? "",
+    default: () => "",
+  }),
+
   // Final answer from the agent
   finalAnswer: Annotation<string>({
     reducer: (current, update) => update ?? current ?? "",
@@ -157,7 +163,7 @@ export class LangchainAgentAdapter implements IAgent {
       const evaluationPrompt = [
         new SystemMessage(evaluatorPrompt),
         new HumanMessage(
-          `User query: ${extractText(state.messages[0]?.content) ?? "N/A"}\n\nAI response: ${answerText}`,
+          `User query: ${state.userQuery || "N/A"}\n\nAI response: ${answerText}`,
         ),
       ];
 
@@ -295,8 +301,18 @@ export class LangchainAgentAdapter implements IAgent {
       const historyMessages: Array<HumanMessage | AIMessage> =
         history.map(toLangchainMessage);
 
+      // The evaluator only sees text, so tell it about any attached images
+      const attachmentCount = query.attachments?.length ?? 0;
+      const userQuery =
+        attachmentCount > 0
+          ? `${query.content}\n[User attached ${attachmentCount} image(s)]`
+          : query.content;
+
       const stream = await compiledGraph.stream(
-        { messages: [...historyMessages, toLangchainMessage(query)] },
+        {
+          messages: [...historyMessages, toLangchainMessage(query)],
+          userQuery,
+        },
         { signal },
       );
 
