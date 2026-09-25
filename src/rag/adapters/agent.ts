@@ -1,8 +1,9 @@
-import type { ContentBlock } from "@langchain/core/messages";
+import type { BaseMessage, ContentBlock } from "@langchain/core/messages";
 import {
   AIMessage,
   HumanMessage,
   SystemMessage,
+  ToolMessage,
 } from "@langchain/core/messages";
 import { tool } from "@langchain/core/tools";
 import { END, START, StateGraph } from "@langchain/langgraph";
@@ -81,6 +82,7 @@ export class LangchainAgentAdapter implements IAgent {
     // Separate LLM instance for evaluation (not bound to tools, so its events don't leak into the graph stream)
     const evaluationLlm = options.model.bindTools([]);
     const MAX_RETRIEVER_ITERATIONS = 3;
+    const MAX_EVALUATOR_CONTEXT_CHARS = 30_000;
 
     const extractText = (c: string | Array<ContentBlock | string>): string => {
       if (typeof c === "string") {
@@ -98,6 +100,39 @@ export class LangchainAgentAdapter implements IAgent {
           return (block.text as string).replace(/\n+$/, "");
         })
         .join("\n");
+    };
+
+    // History only contains human/AI messages, so all tool results belong to the current turn
+    const collectToolContext = (messages: Array<BaseMessage>): string => {
+      const blocks = messages
+        .filter((m): m is ToolMessage => m instanceof ToolMessage)
+        .map((m) => `--- ${m.name ?? "tool"} ---\n${extractText(m.content)}`);
+
+      if (blocks.length === 0) {
+        return "(none — the assistant did not call any tools)";
+      }
+
+      // Keep the newest results within the budget
+      const kept: Array<string> = [];
+      let used = 0;
+      for (let i = blocks.length - 1; i >= 0; i--) {
+        const remaining = MAX_EVALUATOR_CONTEXT_CHARS - used;
+        if (remaining <= 0) {
+          break;
+        }
+        const block =
+          blocks[i].length > remaining
+            ? `${blocks[i].substring(0, remaining)}\n[TRUNCATED]`
+            : blocks[i];
+        kept.unshift(block);
+        used += block.length;
+      }
+
+      const omitted = blocks.length - kept.length;
+      if (omitted > 0) {
+        kept.unshift(`[${omitted} earlier tool result(s) omitted]`);
+      }
+      return kept.join("\n");
     };
 
     const extractJson = (text: string): string => {
@@ -163,7 +198,9 @@ export class LangchainAgentAdapter implements IAgent {
       const evaluationPrompt = [
         new SystemMessage(evaluatorPrompt),
         new HumanMessage(
-          `User query: ${state.userQuery || "N/A"}\n\nAI response: ${answerText}`,
+          `User query: ${state.userQuery || "N/A"}\n\n` +
+            `Retrieved context:\n${collectToolContext(state.messages)}\n\n` +
+            `AI response: ${answerText}`,
         ),
       ];
 
