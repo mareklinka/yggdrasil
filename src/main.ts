@@ -19,6 +19,14 @@ export default class YggdrasilPlugin extends Plugin {
     throw e;
   };
 
+  readonly #loadErrorHandler: (e: Error) => void = (e) => {
+    console.error("Yggdrasil:", e);
+    new Notice(
+      "Yggdrasil: vector store could not be loaded (file may be corrupted). " +
+        "Run 'Re-index vault' to rebuild it.",
+    );
+  };
+
   public constructor(app: App, manifest: PluginManifest) {
     super(app, manifest);
   }
@@ -36,6 +44,7 @@ export default class YggdrasilPlugin extends Plugin {
       this.#data,
       this.#getDbPath(),
       this.#embeddingErrorHandler,
+      this.#loadErrorHandler,
     );
     this.#changeTracker = new ChangeTracker(this.app.vault, this.#rag);
 
@@ -123,6 +132,7 @@ export default class YggdrasilPlugin extends Plugin {
       this.#data,
       this.#getDbPath(),
       this.#embeddingErrorHandler,
+      this.#loadErrorHandler,
     );
     this.#changeTracker = new ChangeTracker(this.app.vault, this.#rag);
   }

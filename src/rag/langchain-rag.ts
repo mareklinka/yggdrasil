@@ -24,6 +24,7 @@ export class LangchainRag {
   readonly #splitter: IDocumentSplitter;
   readonly #vectorStore: IVectorStore;
   readonly #agent: IAgent;
+  readonly #ready: Promise<void>;
 
   public constructor(
     vault: Vault,
@@ -31,6 +32,7 @@ export class LangchainRag {
     splitter: IDocumentSplitter,
     vectorStore: IVectorStore,
     agent: IAgent,
+    onLoadError: (e: Error) => void,
   ) {
     this.#vault = vault;
     this.#dbPath = dbPath;
@@ -38,10 +40,14 @@ export class LangchainRag {
     this.#vectorStore = vectorStore;
     this.#agent = agent;
 
-    this.#loadFromDisk();
+    // Public methods await this so they never race with the initial load
+    this.#ready = this.#loadFromDisk().catch((e: unknown): void => {
+      onLoadError(e instanceof Error ? e : new Error(String(e)));
+    });
   }
 
   public async index(...files: Array<TFile>): Promise<void> {
+    await this.#ready;
     console.log("Indexing", files.length, "files...");
 
     const docs: Array<LangchainDocument> = [];
@@ -68,11 +74,13 @@ export class LangchainRag {
     await this.#saveToDisk();
   }
 
-  public delete(path: string): void {
+  public async delete(path: string): Promise<void> {
+    await this.#ready;
     this.#vectorStore.deleteDocumentsByPath(path);
   }
 
   public async clear(): Promise<void> {
+    await this.#ready;
     this.#vectorStore.setVectors([]);
     if (await this.#vault.adapter.exists(this.#dbPath)) {
       await this.#vault.adapter.remove(this.#dbPath);
@@ -85,6 +93,7 @@ export class LangchainRag {
     history: Array<ChatMessage>,
     signal?: AbortSignal,
   ): Promise<string> {
+    await this.#ready;
     console.log("Querying agent with messages:", query);
     const chatMessage: ChatMessage = {
       role: "user",
@@ -142,6 +151,7 @@ export function createLangchainRag(
   settings: YggdrasilSettings,
   dbPath: string,
   embeddingErrorHandler: (e: unknown) => void,
+  loadErrorHandler: (e: Error) => void,
 ): LangchainRag {
   const splitter = new LangchainSplitterAdapter(
     settings.splitterChunkSize,
@@ -183,5 +193,12 @@ export function createLangchainRag(
     systemPrompt,
   });
 
-  return new LangchainRag(vault, dbPath, splitter, vectorStore, agent);
+  return new LangchainRag(
+    vault,
+    dbPath,
+    splitter,
+    vectorStore,
+    agent,
+    loadErrorHandler,
+  );
 }
