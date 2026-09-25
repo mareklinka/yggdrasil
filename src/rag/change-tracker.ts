@@ -95,8 +95,7 @@ export class ChangeTracker {
       try {
         switch (op.type) {
           case "modify": {
-            await this.rag.delete(op.file.path);
-            await this.rag.index(op.file);
+            await this.rag.reindex(op.file);
             break;
           }
 
@@ -113,8 +112,7 @@ export class ChangeTracker {
               );
               continue;
             }
-            await this.rag.delete(op.oldPath);
-            await this.rag.index(op.file);
+            await this.rag.reindex(op.file, op.oldPath);
             break;
           }
         }

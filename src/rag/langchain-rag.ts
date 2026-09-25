@@ -48,6 +48,34 @@ export class LangchainRag {
 
   public async index(...files: Array<TFile>): Promise<void> {
     await this.#ready;
+    const allSplits = await this.#loadAndSplit(files);
+    await this.#vectorStore.addDocuments(allSplits);
+    await this.#saveToDisk();
+  }
+
+  public async delete(path: string): Promise<void> {
+    await this.#ready;
+    this.#vectorStore.deleteDocumentsByPath(path);
+    await this.#saveToDisk();
+  }
+
+  /**
+   * Replaces a file's chunks (e.g. after modify/rename), persisting once.
+   * If embedding fails, the previous chunks are kept.
+   */
+  public async reindex(
+    file: TFile,
+    oldPath: string = file.path,
+  ): Promise<void> {
+    await this.#ready;
+    const splits = await this.#loadAndSplit([file]);
+    await this.#vectorStore.replaceDocumentsByPath(oldPath, splits);
+    await this.#saveToDisk();
+  }
+
+  async #loadAndSplit(
+    files: Array<TFile>,
+  ): Promise<Array<LangchainDocument>> {
     console.log("Indexing", files.length, "files...");
 
     const docs: Array<LangchainDocument> = [];
@@ -70,13 +98,7 @@ export class LangchainRag {
     const allSplits = await this.#splitter.splitDocuments(docs);
     console.log(`Split files into ${allSplits.length} sub-documents.`);
 
-    await this.#vectorStore.addDocuments(allSplits);
-    await this.#saveToDisk();
-  }
-
-  public async delete(path: string): Promise<void> {
-    await this.#ready;
-    this.#vectorStore.deleteDocumentsByPath(path);
+    return allSplits;
   }
 
   public async clear(): Promise<void> {

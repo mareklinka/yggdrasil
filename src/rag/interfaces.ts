@@ -15,6 +15,8 @@ export interface IEmbeddings {
 export interface IVectorStore {
   addDocuments(docs: Array<Document>): Promise<void>;
   deleteDocumentsByPath(path: string): void;
+  /** Embeds docs, then atomically swaps out all chunks stored under oldPath. */
+  replaceDocumentsByPath(oldPath: string, docs: Array<Document>): Promise<void>;
   similaritySearch(query: string, k: number): Promise<Array<Document>>;
   setVectors(vecs: Array<unknown>): void;
   getVectors(): Array<unknown>;

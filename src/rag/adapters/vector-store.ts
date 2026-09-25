@@ -5,8 +5,10 @@ import type { IEmbeddings, IVectorStore } from "../interfaces";
 
 export class LangchainVectorStoreAdapter implements IVectorStore {
   readonly #store: MemoryVectorStore;
+  readonly #embeddings: IEmbeddings;
 
   public constructor(embeddings: IEmbeddings) {
+    this.#embeddings = embeddings;
     this.#store = new MemoryVectorStore(embeddings);
   }
 
@@ -21,6 +23,18 @@ export class LangchainVectorStoreAdapter implements IVectorStore {
     const filtered = vectors.filter((v) => v.metadata.path !== path);
     console.log('Removed', vectors.length - filtered.length, 'chunk(s)');
     this.setVectors(filtered);
+  }
+
+  public async replaceDocumentsByPath(
+    oldPath: string,
+    docs: Array<Document>,
+  ): Promise<void> {
+    // Embed first: if this throws, the existing chunks are left untouched
+    const vectors = await this.#embeddings.embedDocuments(
+      docs.map((d) => d.pageContent),
+    );
+    this.deleteDocumentsByPath(oldPath);
+    await this.#store.addVectors(vectors, docs);
   }
 
   public similaritySearch(query: string, k: number): Promise<Array<Document>> {
