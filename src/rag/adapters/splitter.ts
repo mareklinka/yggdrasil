@@ -1,13 +1,13 @@
 import type { Document } from "@langchain/core/documents";
-import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
+import { MarkdownTextSplitter } from "@langchain/textsplitters";
 
 import type { IDocumentSplitter } from "../interfaces";
 
 export class LangchainSplitterAdapter implements IDocumentSplitter {
-  readonly #splitter: RecursiveCharacterTextSplitter;
+  readonly #splitter: MarkdownTextSplitter;
 
   public constructor(chunkSize: number, chunkOverlap: number) {
-    this.#splitter = new RecursiveCharacterTextSplitter({
+    this.#splitter = new MarkdownTextSplitter({
       chunkSize,
       chunkOverlap,
     });

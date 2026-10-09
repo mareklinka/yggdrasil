@@ -9,6 +9,7 @@ export interface YggdrasilSettings {
   chatModelHasVision: boolean;
   splitterChunkSize: number;
   splitterChunkOverlap: number;
+  retrieveScoreThreshold: number;
 }
 
 export const DEFAULT_SETTINGS: YggdrasilSettings = {
@@ -22,6 +23,8 @@ export const DEFAULT_SETTINGS: YggdrasilSettings = {
   chatModelHasVision: false,
   splitterChunkSize: 500,
   splitterChunkOverlap: 100,
+  // 0 disables the cutoff; the right value depends on the embedding model
+  retrieveScoreThreshold: 0,
 };
 
 export function validateBaseUrl(value: string): string | null {
@@ -39,6 +42,13 @@ export function validateBaseUrl(value: string): string | null {
 export function validatePositiveInt(value: number): string | null {
   if (!Number.isInteger(value) || value < 0) {
     return "Must be a non-negative integer";
+  }
+  return null;
+}
+
+export function validateScoreThreshold(value: number): string | null {
+  if (!Number.isFinite(value) || value < 0 || value > 1) {
+    return "Must be a number between 0 and 1";
   }
   return null;
 }

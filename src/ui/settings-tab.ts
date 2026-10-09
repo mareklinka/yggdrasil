@@ -8,7 +8,7 @@ import { Notice, PluginSettingTab, Setting } from "obsidian";
 
 import type YggdrasilPlugin from "../main";
 import type { YggdrasilSettings } from "../settings";
-import { validateBaseUrl, validatePositiveInt } from "../settings";
+import { validateBaseUrl, validatePositiveInt, validateScoreThreshold } from "../settings";
 
 export class YggdrasilSettingTab extends PluginSettingTab {
   readonly #plugin: YggdrasilPlugin;
@@ -197,6 +197,34 @@ export class YggdrasilSettingTab extends PluginSettingTab {
         splitterChunkOverlap: value,
       }),
     );
+
+    new Setting(containerEl)
+      .setName("Retrieval score threshold")
+      .setDesc(
+        "Minimum similarity (0–1) a note chunk needs to be passed to the chat model. " +
+          "0 disables the cutoff. Suitable values depend on the embedding model.",
+      )
+      .addText((text: TextComponent): void => {
+        text
+          .setValue(settings.retrieveScoreThreshold.toString())
+          .onChange(async (value: string): Promise<void> => {
+            const parsed: number = parseFloat(value);
+            const error: string | null = validateScoreThreshold(parsed);
+            if (error !== null) {
+              text.inputEl.classList.add("yggdrasil-input-error");
+              return;
+            }
+            text.inputEl.classList.remove("yggdrasil-input-error");
+            await this.#plugin.setSettings({
+              ...this.#plugin.getSettings(),
+              retrieveScoreThreshold: parsed,
+            });
+          });
+        text.inputEl.type = "number";
+        text.inputEl.step = "0.05";
+        text.inputEl.min = "0";
+        text.inputEl.max = "1";
+      });
   }
 
   #renderPositiveIntSetting(
