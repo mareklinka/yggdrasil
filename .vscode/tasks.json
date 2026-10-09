@@ -52,7 +52,9 @@
                 "-w",
                 "/source",
                 "yggdrasil-opencode-dev-1",
-                "claude"
+                "claude",
+                "--permission-mode",
+                "auto"
             ],
             "presentation": {
                 "echo": false,

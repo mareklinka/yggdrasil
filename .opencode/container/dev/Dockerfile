@@ -17,11 +17,13 @@ RUN apk add --no-cache \
 
 WORKDIR /source
 
-ENV PATH="/root/.opencode/bin:${PATH}"
+ENV PATH="/root/.opencode/bin:/root/.local/bin:${PATH}"
 
 # Install OpenCode CLI and Claude CLI
 RUN npm i -g opencode-ai
-RUN npm i -g @anthropic-ai/claude-code
+RUN curl -fsSL https://claude.ai/install.sh | bash
+
+ENV SHELL="/bin/bash"
 
 ENTRYPOINT [ "/bin/bash" ]
 CMD [ "-l", "-c", "echo 'Source mounted at /source. Run \"opencode\" to start coding.'; exec /bin/bash" ]
