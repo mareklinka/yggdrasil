@@ -205,7 +205,10 @@ export function createLangchainRag(
     },
   });
 
-  const retrieveTool = new RetrieveToolAdapter(vectorStore);
+  const retrieveTool = new RetrieveToolAdapter(
+    vectorStore,
+    settings.retrieveScoreThreshold,
+  );
   const listFolderTool = new ListFolderTool(vault);
   const readFileTool = new ReadFileTool(vault);
 

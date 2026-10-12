@@ -11,13 +11,32 @@ export interface IEmbeddings {
   embedQuery(text: string): Promise<Array<number>>;
 }
 
+/** Options for a maximal marginal relevance (MMR) search. */
+export interface MmrSearchOptions {
+  /** Number of documents to return. */
+  k: number;
+  /** Number of nearest candidates to pick the k documents from. */
+  fetchK: number;
+  /** 1 = pure relevance, 0 = maximum diversity. */
+  lambda: number;
+  /** Candidates with a query similarity below this value are dropped before MMR. */
+  scoreThreshold: number;
+}
+
+/** A retrieved document with its cosine similarity to the query. */
+export interface ScoredDocument {
+  document: Document;
+  score: number;
+}
+
 /** Stores and retrieves document embeddings. */
 export interface IVectorStore {
   addDocuments(docs: Array<Document>): Promise<void>;
   deleteDocumentsByPath(path: string): void;
   /** Embeds docs, then atomically swaps out all chunks stored under oldPath. */
   replaceDocumentsByPath(oldPath: string, docs: Array<Document>): Promise<void>;
-  similaritySearch(query: string, k: number): Promise<Array<Document>>;
+  /** Drops candidates below the score threshold, then diversifies the rest with MMR. */
+  maxMarginalRelevanceSearch(query: string, options: MmrSearchOptions): Promise<Array<ScoredDocument>>;
   setVectors(vecs: Array<unknown>): void;
   getVectors(): Array<unknown>;
 }

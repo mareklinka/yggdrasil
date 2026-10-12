@@ -242,22 +242,29 @@ export class LangchainAgentAdapter implements IAgent {
           // Tool loop: run requested tools and call the model again, up to the round limit
           for (let toolRound = 0; ; toolRound++) {
             const toolCalls = toolCallsOf(response);
+
             if (toolCalls.length === 0) {
               break;
             }
+
             if (toolRound >= MAX_TOOL_ROUNDS) {
               console.warn(
                 `Tool round limit (${MAX_TOOL_ROUNDS}) reached, forcing an answer`,
               );
+
               response = await forceAnswer(messages);
+
               break;
             }
+
             const results = await Promise.all(
               toolCalls.map((tc) => callTool(tc)),
             );
+
             messages = [...messages, response, ...results];
             response = await callModel(messages, retrieverRound);
           }
+
           messages = [...messages, response];
 
           const content = response instanceof AIMessage ? response.content : "";
@@ -273,6 +280,7 @@ export class LangchainAgentAdapter implements IAgent {
             messages,
             answerText,
           );
+
           const decision = evaluation?.quality === "poor" ? "retriever" : "end";
           console.log("Evaluator result:", decision, {
             decision,
@@ -282,6 +290,7 @@ export class LangchainAgentAdapter implements IAgent {
           if (evaluation?.quality !== "poor") {
             return answerText;
           }
+
           messages = [
             ...messages,
             new HumanMessage("Evaluation result: " + evaluation.reason),

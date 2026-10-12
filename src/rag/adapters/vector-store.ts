@@ -1,15 +1,65 @@
 import { MemoryVectorStore } from "@langchain/classic/vectorstores/memory";
-import type { Document } from "@langchain/core/documents";
+import { Document } from "@langchain/core/documents";
+import { maximalMarginalRelevance } from "@langchain/core/utils/math";
 
-import type { IEmbeddings, IVectorStore } from "../interfaces";
+import type {
+  IEmbeddings,
+  IVectorStore,
+  MmrSearchOptions,
+  ScoredDocument,
+} from "../interfaces";
+
+/**
+ * MemoryVectorStore's own MMR search discards the similarity scores. This subclass
+ * reuses its protected candidate query to keep them, and to filter by score before MMR.
+ */
+class ScoredMemoryVectorStore extends MemoryVectorStore {
+  public async maxMarginalRelevanceSearchWithScore(
+    query: string,
+    options: MmrSearchOptions,
+  ): Promise<Array<ScoredDocument>> {
+    const queryEmbedding = await this.embeddings.embedQuery(query);
+    const fetched = await this._queryVectors(queryEmbedding, options.fetchK);
+    const candidates = fetched.filter(
+      (c) => c.similarity >= options.scoreThreshold,
+    );
+
+    const dropped = fetched.filter((c) => c.similarity < options.scoreThreshold);
+    if (dropped.length > 0) {
+      console.log(
+        `Dropped ${dropped.length} candidate(s) below score threshold ${options.scoreThreshold}:`,
+        dropped.map((c) => `${c.metadata.path} (${c.similarity.toFixed(3)})`),
+      );
+    }
+
+    const selected = maximalMarginalRelevance(
+      queryEmbedding,
+      candidates.map((c) => c.embedding),
+      options.lambda,
+      options.k,
+    );
+
+    return selected.map((idx) => {
+      const candidate = candidates[idx];
+      return {
+        document: new Document({
+          pageContent: candidate.content,
+          metadata: candidate.metadata,
+          id: candidate.id,
+        }),
+        score: candidate.similarity,
+      };
+    });
+  }
+}
 
 export class LangchainVectorStoreAdapter implements IVectorStore {
-  readonly #store: MemoryVectorStore;
+  readonly #store: ScoredMemoryVectorStore;
   readonly #embeddings: IEmbeddings;
 
   public constructor(embeddings: IEmbeddings) {
     this.#embeddings = embeddings;
-    this.#store = new MemoryVectorStore(embeddings);
+    this.#store = new ScoredMemoryVectorStore(embeddings);
   }
 
   public addDocuments(docs: Array<Document>): Promise<void> {
@@ -21,7 +71,7 @@ export class LangchainVectorStoreAdapter implements IVectorStore {
       metadata: { path: string };
     }>;
     const filtered = vectors.filter((v) => v.metadata.path !== path);
-    console.log('Removed', vectors.length - filtered.length, 'chunk(s)');
+    console.log("Removed", vectors.length - filtered.length, "chunk(s)");
     this.setVectors(filtered);
   }
 
@@ -37,8 +87,11 @@ export class LangchainVectorStoreAdapter implements IVectorStore {
     await this.#store.addVectors(vectors, docs);
   }
 
-  public similaritySearch(query: string, k: number): Promise<Array<Document>> {
-    return this.#store.similaritySearch(query, k);
+  public maxMarginalRelevanceSearch(
+    query: string,
+    options: MmrSearchOptions,
+  ): Promise<Array<ScoredDocument>> {
+    return this.#store.maxMarginalRelevanceSearchWithScore(query, options);
   }
 
   public setVectors(vecs: Array<unknown>): void {
