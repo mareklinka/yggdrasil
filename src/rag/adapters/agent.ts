@@ -11,7 +11,12 @@ import { entrypoint, task } from "@langchain/langgraph";
 import type { ChatOpenAI } from "@langchain/openai";
 import { z } from "zod";
 
-import type { ChatMessage, IAgent, IVaultTool } from "../interfaces";
+import type {
+  ChatAttachment,
+  ChatMessage,
+  IAgent,
+  IVaultTool,
+} from "../interfaces";
 import { evaluatorPrompt } from "../prompts";
 
 interface AgentInput {
@@ -20,6 +25,9 @@ interface AgentInput {
 
   // The current user query, for the evaluator (messages also contain history)
   userQuery: string;
+
+  // Images attached to the current user query, so the evaluator can check the answer against them
+  userImages: Array<ChatAttachment>;
 }
 
 const EvaluationSchema = z.object({
@@ -28,6 +36,15 @@ const EvaluationSchema = z.object({
 });
 
 type Evaluation = z.infer<typeof EvaluationSchema>;
+
+const toImageBlocks = (
+  attachments: Array<ChatAttachment>,
+): Array<ContentBlock> =>
+  attachments.map((a) => ({
+    type: "image_url" as const,
+    // eslint-disable-next-line @typescript-eslint/naming-convention
+    image_url: { url: a.dataUrl },
+  }));
 
 export class LangchainAgentAdapter implements IAgent {
   readonly #invoker: (
@@ -195,17 +212,26 @@ export class LangchainAgentAdapter implements IAgent {
       "evaluate",
       async (
         userQuery: string,
+        userImages: Array<ChatAttachment>,
         messages: Array<BaseMessage>,
         answerText: string,
       ): Promise<Evaluation | undefined> => {
         console.log("Evaluating answer quality", { userQuery, answerText });
 
+        const evaluationText =
+          `User query: ${userQuery || "N/A"}\n\n` +
+          `Retrieved context:\n${collectToolContext(messages)}\n\n` +
+          `AI response: ${answerText}`;
+
         const evaluationPrompt = [
           new SystemMessage(evaluatorPrompt),
           new HumanMessage(
-            `User query: ${userQuery || "N/A"}\n\n` +
-              `Retrieved context:\n${collectToolContext(messages)}\n\n` +
-              `AI response: ${answerText}`,
+            userImages.length > 0
+              ? [
+                  { type: "text", text: evaluationText },
+                  ...toImageBlocks(userImages),
+                ]
+              : evaluationText,
           ),
         ];
 
@@ -277,6 +303,7 @@ export class LangchainAgentAdapter implements IAgent {
 
           const evaluation = await evaluate(
             input.userQuery,
+            input.userImages,
             messages,
             answerText,
           );
@@ -317,11 +344,7 @@ export class LangchainAgentAdapter implements IAgent {
         if (entry.attachments !== undefined && entry.attachments.length > 0) {
           const content: Array<ContentBlock> = [
             { type: "text", text: entry.content },
-            ...entry.attachments.map((a) => ({
-              type: "image_url" as const,
-              // eslint-disable-next-line @typescript-eslint/naming-convention
-              image_url: { url: a.dataUrl },
-            })),
+            ...toImageBlocks(entry.attachments),
           ];
           return new HumanMessage(content);
         }
@@ -331,17 +354,18 @@ export class LangchainAgentAdapter implements IAgent {
       const historyMessages: Array<HumanMessage | AIMessage> =
         history.map(toLangchainMessage);
 
-      // The evaluator only sees text, so tell it about any attached images
-      const attachmentCount = query.attachments?.length ?? 0;
+      // The evaluator gets the current query's images after its text, so point it to them
+      const userImages = query.attachments ?? [];
       const userQuery =
-        attachmentCount > 0
-          ? `${query.content}\n[User attached ${attachmentCount} image(s)]`
+        userImages.length > 0
+          ? `${query.content}\n[User attached ${userImages.length} image(s), included below]`
           : query.content;
 
       const answer = await agent.invoke(
         {
           messages: [...historyMessages, toLangchainMessage(query)],
           userQuery,
+          userImages,
         },
         { signal },
       );
