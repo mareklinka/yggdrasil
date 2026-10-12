@@ -286,6 +286,7 @@ export class ChatView extends ItemView {
         if (error instanceof DOMException && error.name === "AbortError") {
           this.#renderMessage("Request cancelled.", "assistant");
         } else {
+          console.error("Request error", error);
           this.#renderMessage(`Request error: ${error}`, "assistant");
         }
       } finally {
