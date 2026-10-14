@@ -2,7 +2,7 @@ import { OpenAIEmbeddings } from "@langchain/openai";
 
 import type { IEmbeddings } from "../interfaces";
 
-export class LangchainEmbeddingsAdapter implements IEmbeddings {
+export class YggdrasilEmbeddings implements IEmbeddings {
   readonly #embeddings: OpenAIEmbeddings;
 
   public constructor(options: {

@@ -13,7 +13,7 @@ import type {
  * MemoryVectorStore's own MMR search discards the similarity scores. This subclass
  * reuses its protected candidate query to keep them, and to filter by score before MMR.
  */
-class ScoredMemoryVectorStore extends MemoryVectorStore {
+class ScoredMmrVectorStore extends MemoryVectorStore {
   public async maxMarginalRelevanceSearchWithScore(
     query: string,
     options: MmrSearchOptions,
@@ -53,13 +53,13 @@ class ScoredMemoryVectorStore extends MemoryVectorStore {
   }
 }
 
-export class LangchainVectorStoreAdapter implements IVectorStore {
-  readonly #store: ScoredMemoryVectorStore;
+export class YggdrasilVectorStore implements IVectorStore {
+  readonly #store: ScoredMmrVectorStore;
   readonly #embeddings: IEmbeddings;
 
   public constructor(embeddings: IEmbeddings) {
     this.#embeddings = embeddings;
-    this.#store = new ScoredMemoryVectorStore(embeddings);
+    this.#store = new ScoredMmrVectorStore(embeddings);
   }
 
   public addDocuments(docs: Array<Document>): Promise<void> {

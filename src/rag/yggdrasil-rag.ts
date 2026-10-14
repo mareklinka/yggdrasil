@@ -4,11 +4,11 @@ import type { TFile, Vault } from "obsidian";
 import { deflate, inflate } from "pako";
 
 import type { YggdrasilSettings } from "../settings";
-import { LangchainAgentAdapter } from "./adapters/agent";
-import { LangchainEmbeddingsAdapter } from "./adapters/embeddings";
-import { RetrieveToolAdapter } from "./adapters/retrieve-tool";
-import { LangchainSplitterAdapter } from "./adapters/splitter";
-import { LangchainVectorStoreAdapter } from "./adapters/vector-store";
+import { RetrieveTool } from "./adapters/retrieve-tool";
+import { YggdrasilAgent } from "./adapters/yggdrasil-agent";
+import { YggdrasilEmbeddings } from "./adapters/yggdrasil-embeddings";
+import { YggdrasilSplitter } from "./adapters/yggdrasil-splitter";
+import { YggdrasilVectorStore } from "./adapters/yggdrasil-vector-store";
 import type { ChatAttachment, ChatMessage } from "./interfaces";
 import type { IAgent, IDocumentSplitter, IVectorStore } from "./interfaces";
 import { systemPrompt } from "./prompts";
@@ -18,7 +18,7 @@ export interface DocumentMetadata {
   path: string;
 }
 
-export class LangchainRag {
+export class YggdrasilRag {
   readonly #vault: Vault;
   readonly #dbPath: string;
   readonly #splitter: IDocumentSplitter;
@@ -73,9 +73,7 @@ export class LangchainRag {
     await this.#saveToDisk();
   }
 
-  async #loadAndSplit(
-    files: Array<TFile>,
-  ): Promise<Array<LangchainDocument>> {
+  async #loadAndSplit(files: Array<TFile>): Promise<Array<LangchainDocument>> {
     console.log("Indexing", files.length, "files...");
 
     const docs: Array<LangchainDocument> = [];
@@ -174,13 +172,13 @@ export function createLangchainRag(
   dbPath: string,
   embeddingErrorHandler: (e: unknown) => void,
   loadErrorHandler: (e: Error) => void,
-): LangchainRag {
-  const splitter = new LangchainSplitterAdapter(
+): YggdrasilRag {
+  const splitter = new YggdrasilSplitter(
     settings.splitterChunkSize,
     settings.splitterChunkOverlap,
   );
 
-  const embeddings = new LangchainEmbeddingsAdapter({
+  const embeddings = new YggdrasilEmbeddings({
     model: settings.embeddingsModelPath,
     baseUrl: settings.embeddingsBaseUrl,
     dimensions: settings.embeddingsDimensions,
@@ -188,7 +186,7 @@ export function createLangchainRag(
     errorHandler: embeddingErrorHandler,
   });
 
-  const vectorStore = new LangchainVectorStoreAdapter(embeddings);
+  const vectorStore = new YggdrasilVectorStore(embeddings);
 
   const rawChatModel = new ChatOpenAI({
     model: settings.chatModelPath,
@@ -205,20 +203,20 @@ export function createLangchainRag(
     },
   });
 
-  const retrieveTool = new RetrieveToolAdapter(
+  const retrieveTool = new RetrieveTool(
     vectorStore,
     settings.retrieveScoreThreshold,
   );
   const listFolderTool = new ListFolderTool(vault);
   const readFileTool = new ReadFileTool(vault);
 
-  const agent = new LangchainAgentAdapter({
-    model: rawChatModel,
+  const agent = new YggdrasilAgent({
+    rawModel: rawChatModel,
     tools: [retrieveTool, listFolderTool, readFileTool],
     systemPrompt,
   });
 
-  return new LangchainRag(
+  return new YggdrasilRag(
     vault,
     dbPath,
     splitter,

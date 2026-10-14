@@ -10,7 +10,7 @@ const MMR_LAMBDA = 0.7;
 
 export const NO_RESULTS_MESSAGE = "No relevant notes found for this query.";
 
-export class RetrieveToolAdapter implements IVaultTool {
+export class RetrieveTool implements IVaultTool {
   readonly #vectorStore: IVectorStore;
   readonly #scoreThreshold: number;
 

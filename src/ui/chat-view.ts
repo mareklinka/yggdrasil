@@ -2,7 +2,7 @@ import type { WorkspaceLeaf } from "obsidian";
 import { ItemView, MarkdownRenderer, Notice } from "obsidian";
 
 import type { ChatAttachment, ChatMessage } from "../rag/interfaces";
-import type { LangchainRag } from "../rag/langchain-rag";
+import type { YggdrasilRag } from "../rag/yggdrasil-rag";
 import type { YggdrasilSettings } from "../settings";
 import { MessageHistory } from "./message-history";
 
@@ -23,7 +23,7 @@ export class ChatView extends ItemView {
 
   public constructor(
     leaf: WorkspaceLeaf,
-    private readonly getRag: () => LangchainRag,
+    private readonly getRag: () => YggdrasilRag,
     private readonly getSettings: () => YggdrasilSettings,
   ) {
     super(leaf);

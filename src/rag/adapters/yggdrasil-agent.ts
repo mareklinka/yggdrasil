@@ -46,7 +46,7 @@ const toImageBlocks = (
     image_url: { url: a.dataUrl },
   }));
 
-export class LangchainAgentAdapter implements IAgent {
+export class YggdrasilAgent implements IAgent {
   readonly #invoker: (
     query: ChatMessage,
     history: Array<ChatMessage>,
@@ -54,7 +54,7 @@ export class LangchainAgentAdapter implements IAgent {
   ) => Promise<string>;
 
   public constructor(options: {
-    model: ChatOpenAI;
+    rawModel: ChatOpenAI;
     tools: Array<IVaultTool>;
     systemPrompt: string;
   }) {
@@ -68,10 +68,11 @@ export class LangchainAgentAdapter implements IAgent {
     const toolsByName = new Map(langchainTools.map((t) => [t.name, t]));
 
     // Main LLM bound to tools for agent loop
-    const llm = options.model.bindTools(langchainTools);
+    const llmWithTools = options.rawModel.bindTools(langchainTools);
 
     // LLM without tools, for evaluation and for forcing a text answer
-    const plainLlm = options.model.bindTools([]);
+    const llmWithoutTools = options.rawModel.bindTools([]);
+
     const MAX_RETRIEVER_ITERATIONS = 3;
     const MAX_EVALUATOR_CONTEXT_CHARS = 30_000;
     const MAX_TOOL_ROUNDS = 10;
@@ -143,8 +144,7 @@ export class LangchainAgentAdapter implements IAgent {
     const toolCallsOf = (message: BaseMessage): Array<ToolCall> =>
       message instanceof AIMessage ? (message.tool_calls ?? []) : [];
 
-    // Retriever turn: tool-bound model call
-    const callModel = task(
+    const callMainModel = task(
       "callModel",
       async (
         messages: Array<BaseMessage>,
@@ -154,7 +154,7 @@ export class LangchainAgentAdapter implements IAgent {
           `Retriever turn (evaluation round ${retrieverRound + 1} of ${MAX_RETRIEVER_ITERATIONS})`,
           messages,
         );
-        return llm.invoke([
+        return llmWithTools.invoke([
           new SystemMessage(options.systemPrompt),
           ...messages,
         ]);
@@ -165,7 +165,7 @@ export class LangchainAgentAdapter implements IAgent {
     const forceAnswer = task(
       "forceAnswer",
       async (messages: Array<BaseMessage>): Promise<BaseMessage> =>
-        plainLlm.invoke([new SystemMessage(options.systemPrompt), ...messages]),
+        llmWithoutTools.invoke([new SystemMessage(options.systemPrompt), ...messages]),
     );
 
     // Failures become error tool messages, like ToolNode's default error handling
@@ -235,7 +235,7 @@ export class LangchainAgentAdapter implements IAgent {
           ),
         ];
 
-        const evaluationResponse = await plainLlm.invoke(evaluationPrompt);
+        const evaluationResponse = await llmWithoutTools.invoke(evaluationPrompt);
         const evaluationContent =
           evaluationResponse instanceof AIMessage
             ? evaluationResponse.content
@@ -263,7 +263,7 @@ export class LangchainAgentAdapter implements IAgent {
         let messages = input.messages;
 
         for (let retrieverRound = 0; ; retrieverRound++) {
-          let response = await callModel(messages, retrieverRound);
+          let response = await callMainModel(messages, retrieverRound);
 
           // Tool loop: run requested tools and call the model again, up to the round limit
           for (let toolRound = 0; ; toolRound++) {
@@ -288,7 +288,7 @@ export class LangchainAgentAdapter implements IAgent {
             );
 
             messages = [...messages, response, ...results];
-            response = await callModel(messages, retrieverRound);
+            response = await callMainModel(messages, retrieverRound);
           }
 
           messages = [...messages, response];

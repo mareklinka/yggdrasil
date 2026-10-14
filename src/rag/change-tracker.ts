@@ -1,7 +1,7 @@
 import type { EventRef, TAbstractFile, Vault } from "obsidian";
 import { Notice, TFile } from "obsidian";
 
-import type { LangchainRag } from "./langchain-rag";
+import type { YggdrasilRag } from "./yggdrasil-rag";
 
 /** A pending file change operation. */
 interface PendingOperation {
@@ -25,7 +25,7 @@ export class ChangeTracker {
 
   public constructor(
     private readonly vault: Vault,
-    private readonly rag: LangchainRag,
+    private readonly rag: YggdrasilRag,
   ) {
     this.#onModifyRef = this.vault.on("modify", (file: TAbstractFile): void => {
       if (file instanceof TFile) {

@@ -2,8 +2,8 @@ import type { App, PluginManifest, WorkspaceLeaf } from "obsidian";
 import { normalizePath, Notice, Plugin } from "obsidian";
 
 import { ChangeTracker } from "./rag/change-tracker";
-import type { LangchainRag } from "./rag/langchain-rag";
-import { createLangchainRag } from "./rag/langchain-rag";
+import type { YggdrasilRag } from "./rag/yggdrasil-rag";
+import { createLangchainRag } from "./rag/yggdrasil-rag";
 import type { YggdrasilSettings } from "./settings";
 import { DEFAULT_SETTINGS } from "./settings";
 import { CHAT_VIEW_TYPE, ChatView } from "./ui/chat-view";
@@ -11,7 +11,7 @@ import { ReindexConfirmationModal } from "./ui/reindex-confirmation-modal";
 import { YggdrasilSettingTab } from "./ui/settings-tab";
 
 export default class YggdrasilPlugin extends Plugin {
-  #rag!: LangchainRag;
+  #rag!: YggdrasilRag;
   #changeTracker!: ChangeTracker;
   #data: YggdrasilSettings = DEFAULT_SETTINGS;
 

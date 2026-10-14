@@ -3,7 +3,7 @@ import { MarkdownTextSplitter } from "@langchain/textsplitters";
 
 import type { IDocumentSplitter } from "../interfaces";
 
-export class LangchainSplitterAdapter implements IDocumentSplitter {
+export class YggdrasilSplitter implements IDocumentSplitter {
   readonly #splitter: MarkdownTextSplitter;
 
   public constructor(chunkSize: number, chunkOverlap: number) {
