@@ -27,21 +27,28 @@ export class ChangeTracker {
     private readonly vault: Vault,
     private readonly rag: YggdrasilRag,
   ) {
+    // Only markdown files are indexed; binaries (e.g. pasted images) would be read as text
     this.#onModifyRef = this.vault.on("modify", (file: TAbstractFile): void => {
-      if (file instanceof TFile) {
+      if (file instanceof TFile && file.extension === "md") {
         this.#enqueueFileEvent("modify", file);
       }
     });
     this.#onDeleteRef = this.vault.on("delete", (file: TAbstractFile): void => {
-      if (file instanceof TFile) {
+      if (file instanceof TFile && file.extension === "md") {
         this.#enqueueFileEvent("delete", file);
       }
     });
     this.#onRenameRef = this.vault.on(
       "rename",
       (file: TAbstractFile, oldPath: string): void => {
-        if (file instanceof TFile) {
+        if (!(file instanceof TFile)) {
+          return;
+        }
+        if (file.extension === "md") {
           this.#enqueueFileEvent("rename", file, oldPath);
+        } else if (oldPath.endsWith(".md")) {
+          // Renamed away from markdown: drop the note's chunks
+          this.#enqueueFileEvent("delete", file, oldPath);
         }
       },
     );
@@ -100,7 +107,7 @@ export class ChangeTracker {
           }
 
           case "delete": {
-            await this.rag.delete(op.file.path);
+            await this.rag.delete(op.oldPath ?? op.file.path);
             break;
           }
 

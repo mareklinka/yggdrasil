@@ -79,6 +79,11 @@ export class YggdrasilRag {
     const docs: Array<LangchainDocument> = [];
 
     for (const file of files) {
+      if (file.extension !== "md") {
+        console.warn(`Yggdrasil: skipping non-markdown file ${file.path}`);
+        continue;
+      }
+
       const content = await this.#vault.cachedRead(file);
 
       console.log(
