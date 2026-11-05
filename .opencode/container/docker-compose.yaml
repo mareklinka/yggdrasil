@@ -28,7 +28,7 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
-    entrypoint: ["/bin/sh", "-c", "update-ca-certificates 2>/dev/null; exec opencode web --port 10000 --hostname 0.0.0.0 --print-logs"]
+    entrypoint: ["/bin/sh", "-c", "update-ca-certificates 2>/dev/null; exec opencode serve --port 10000 --hostname 0.0.0.0 --print-logs"]
     # some sensitive environment variables are passed via an .env file, which is not checked into source control
     # these include
     #  - NUGET_API_KEY (to allow non-interactive nuget restore)
@@ -43,6 +43,7 @@ services:
       - OPENCODE_CONFIG_DIR=/home/root/.config/opencode/local
       - OPENCODE_DISABLE_MODELS_FETCH=1
       - CLAUDE_CONFIG_DIR=/claude
+      - MISTRAL_API_KEY=${MISTRAL_API_KEY}
     networks:
       internal:
         ipv4_address: 172.3.1.1

@@ -1,7 +1,7 @@
 # Alpine-based Squid with SSL bump (intercept) support.
 # Alpine's squid package is compiled with --enable-ssl --enable-ssl-crtd.
 
-FROM alpine:3.23
+FROM alpine:3.24
 
 RUN apk add --no-cache \
     squid \

@@ -20,7 +20,7 @@ WORKDIR /source
 ENV PATH="/root/.opencode/bin:/root/.local/bin:${PATH}"
 
 # Install OpenCode CLI and Claude CLI
-RUN npm i -g opencode-ai
+RUN curl -fsSL https://opencode.ai/v2/install | bash
 RUN curl -fsSL https://claude.ai/install.sh | bash
 
 ENV SHELL="/bin/bash"

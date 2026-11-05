@@ -41,6 +41,20 @@
             "problemMatcher": []
         },
         {
+            "label": "Update LLM dev container image",
+            "type": "shell",
+            "command": "podman",
+            "args": [
+                "compose",
+                "build",
+                "--no-cache"
+            ],
+            "options": {
+                "cwd": ".opencode/container"
+            },
+            "problemMatcher": []
+        },
+        {
             "label": "Claude CLI",
             "type": "shell",
             "command": "podman",
