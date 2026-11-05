@@ -1,0 +1,84 @@
+name: Beta Release
+
+on:
+  push:
+    branches:
+      - beta
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          # Fetch all history and tags so the beta.N counter can be computed
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify build artifacts
+        run: |
+          for f in dist/main.js dist/manifest.json dist/styles.css; do
+            if [[ ! -f "$f" ]]; then
+              echo "Missing build artifact: $f"
+              exit 1
+            fi
+          done
+
+      - name: Compute beta tag
+        id: tag
+        run: |
+          set -euo pipefail
+
+          VERSION=$(node -p "require('./manifest.json').version")
+
+          # Validate that the manifest version follows semver (official semver.org regex)
+          node -e '
+            const v = process.argv[1];
+            const re = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
+            if (!re.test(v)) {
+              console.error(`manifest.json version "${v}" is not valid semver`);
+              process.exit(1);
+            }
+          ' "$VERSION"
+
+          # N = number of existing <version>-beta.<n> tags + 1,
+          # incremented until a free tag is found (safe on re-runs)
+          ESC=$(printf '%s' "$VERSION" | sed 's/\./\\./g')
+          # `|| true` because grep exits 1 (no matches) when no beta tags exist yet, which pipefail would otherwise treat as failure
+          COUNT=$(git tag --list | grep -E "^${ESC}-beta\.[0-9]+$" | wc -l || true)
+          N=$((COUNT + 1))
+          while git rev-parse -q --verify "refs/tags/${VERSION}-beta.${N}" >/dev/null 2>&1; do
+            N=$((N + 1))
+          done
+
+          TAG="${VERSION}-beta.${N}"
+          echo "Computed tag: $TAG"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Create draft prerelease
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ steps.tag.outputs.tag }}" \
+            --title="${{ steps.tag.outputs.tag }}" \
+            --target "${{ github.sha }}" \
+            --draft \
+            --generate-notes \
+            --prerelease \
+            dist/main.js dist/manifest.json dist/styles.css
