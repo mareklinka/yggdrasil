@@ -51,11 +51,6 @@
       "action": "provider.use",
       "resource": "*",
       "effect": "deny"
-    },
-    {
-      "action": "provider.use",
-      "resource": "llamacpp",
-      "effect": "allow"
     }
   ],
   "experimental": {
